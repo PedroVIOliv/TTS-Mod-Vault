@@ -1,4 +1,4 @@
-import 'dart:io' show File;
+import 'dart:io' show File, Platform;
 
 import 'package:path/path.dart' as p;
 import 'package:tts_mod_vault/src/state/asset/models/asset_model.dart'
@@ -6,8 +6,17 @@ import 'package:tts_mod_vault/src/state/asset/models/asset_model.dart'
 import 'package:tts_mod_vault/src/utils.dart'
     show newSteamUserContentUrl, oldCloudUrl;
 
+/// Builds the `file://` URL TTS stores for a cached asset.
+///
+/// The path is NOT percent-encoded: Unity hands it to the OS verbatim, so an
+/// encoded space makes it look for a directory literally named "My%20Games".
+/// Separators still have to be forward slashes, or the backslashes would need
+/// escaping inside the JSON.
 String localFileUrl(String filePath, {bool? windows}) {
-  return Uri.file(filePath, windows: windows).toString();
+  final isWindows = windows ?? Platform.isWindows;
+  final slashed = filePath.replaceAll(r'\', '/');
+
+  return isWindows ? 'file:///$slashed' : 'file://$slashed';
 }
 
 String localLinksOutputPath(String jsonFilePath) {

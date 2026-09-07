@@ -5,23 +5,25 @@ import 'package:tts_mod_vault/src/state/mods/local_links.dart'
 
 void main() {
   group('localFileUrl', () {
-    test('percent-encodes spaces in a macOS cache path', () {
+    test('leaves spaces literal in a macOS cache path', () {
       expect(
         localFileUrl(
           '/Users/me/Library/Tabletop Simulator/Mods/Images/httpsexample.png',
           windows: false,
         ),
-        'file:///Users/me/Library/Tabletop%20Simulator/Mods/Images/httpsexample.png',
+        'file:///Users/me/Library/Tabletop Simulator/Mods/Images/httpsexample.png',
       );
     });
 
-    test('converts Windows backslashes and drive letter to a file URI', () {
+    // Unity's AssetBundle.LoadFromFile passes the path to Windows verbatim, so
+    // a percent-encoded space makes it look for a directory named "My%20Games".
+    test('converts Windows backslashes without percent-encoding spaces', () {
       expect(
         localFileUrl(
           r'C:\Users\me\Documents\My Games\Tabletop Simulator\Mods\Images\a.png',
           windows: true,
         ),
-        'file:///C:/Users/me/Documents/My%20Games/Tabletop%20Simulator/Mods/Images/a.png',
+        'file:///C:/Users/me/Documents/My Games/Tabletop Simulator/Mods/Images/a.png',
       );
     });
   });

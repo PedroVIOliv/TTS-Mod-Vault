@@ -41,7 +41,9 @@ void main() {
     final writtenUrl = written['ObjectStates'][0]['ImageURL'] as String;
 
     expect(writtenUrl, startsWith('file://'));
-    expect(writtenUrl, contains('My%20Cache'));
-    expect(File.fromUri(Uri.parse(writtenUrl)).path, cachePath);
+    expect(writtenUrl, contains('My Cache'));
+    expect(writtenUrl, isNot(contains('%')));
+    expect(writtenUrl, isNot(contains(r'\')));
+    expect(writtenUrl, endsWith(cachePath.replaceAll(r'\', '/')));
   });
 }
