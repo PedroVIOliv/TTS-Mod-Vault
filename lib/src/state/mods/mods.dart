@@ -1353,6 +1353,7 @@ class ModsStateNotifier extends AsyncNotifier<ModsState> {
         ExportLocalLinksParams(
           sourceJsonFilePath: freshMod.jsonFilePath,
           outputJsonFilePath: outputPath,
+          sourceImageFilePath: freshMod.imageFilePath,
           urlToFilePath: urlToFilePath,
         ),
       );

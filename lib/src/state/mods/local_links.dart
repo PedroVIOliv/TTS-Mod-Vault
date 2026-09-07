@@ -1,5 +1,7 @@
 import 'dart:io' show File, Platform;
 
+import 'package:flutter/foundation.dart' show debugPrint;
+
 import 'package:path/path.dart' as p;
 import 'package:tts_mod_vault/src/state/asset/models/asset_model.dart'
     show Asset;
@@ -86,12 +88,14 @@ String? _urlAsStoredIn(String jsonString, String url) {
 class ExportLocalLinksParams {
   final String sourceJsonFilePath;
   final String outputJsonFilePath;
+  final String? sourceImageFilePath;
   final Map<String, String> urlToFilePath;
 
   const ExportLocalLinksParams({
     required this.sourceJsonFilePath,
     required this.outputJsonFilePath,
     required this.urlToFilePath,
+    this.sourceImageFilePath,
   });
 }
 
@@ -106,6 +110,8 @@ Future<LocalLinksRewriteResult> exportLocalLinksIsolate(
   );
 
   await File(params.outputJsonFilePath).writeAsString(result.jsonString);
+
+  await _copyThumbnail(params);
 
   return result;
 }
@@ -154,4 +160,20 @@ class ExportLocalLinksResult {
         status: ExportLocalLinksStatus.failed,
         errorMessage: message,
       );
+}
+
+// TTS shows the sibling <name>.png as the save's thumbnail. A failed copy
+// leaves the export usable, so it never aborts.
+Future<void> _copyThumbnail(ExportLocalLinksParams params) async {
+  final source = params.sourceImageFilePath;
+  if (source == null || source.isEmpty) return;
+
+  try {
+    final imageFile = File(source);
+    if (!imageFile.existsSync()) return;
+
+    await imageFile.copy(p.setExtension(params.outputJsonFilePath, '.png'));
+  } catch (e) {
+    debugPrint('exportLocalLinksIsolate - thumbnail copy failed: $e');
+  }
 }
