@@ -1,0 +1,50 @@
+name: Windows test build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/export-local-file-links
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.44.4
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+
+      - run: flutter analyze
+
+      - run: flutter test
+
+      - run: flutter build windows --release
+
+      - name: Package
+        shell: pwsh
+        run: |
+          Compress-Archive `
+            -Path build\windows\x64\runner\Release\* `
+            -DestinationPath TTS-Mod-Vault-windows-local-links.zip
+
+      - name: Publish release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete local-links-test --yes --cleanup-tag 2>$null
+          gh release create local-links-test `
+            TTS-Mod-Vault-windows-local-links.zip `
+            --target ${{ github.sha }} `
+            --title "Export with local file links (test build)" `
+            --notes "Unofficial test build of the export-with-local-file-links feature, built from ${{ github.sha }}. Unsigned - Windows SmartScreen will warn on first run."
