@@ -5,6 +5,8 @@ import 'package:hooks_riverpod/hooks_riverpod.dart'
 import 'dart:ui' show ImageFilter;
 import 'package:tts_mod_vault/src/mods/components/components.dart'
     show showUpdateUrlsDialog;
+import 'package:tts_mod_vault/src/mods/components/export_local_links_dialog.dart'
+    show runExportLocalLinksThenShowResults;
 import 'package:tts_mod_vault/src/mods/components/url_check_results_dialog.dart'
     show showUrlCheckResults;
 import 'package:tts_mod_vault/src/state/mods/mod_model.dart' show Mod;
@@ -60,6 +62,21 @@ class SelectedModActionsMenu extends HookConsumerWidget {
 
             final navigator = Navigator.of(context, rootNavigator: true);
             showUrlCheckResults(navigator, ref, selectedMod);
+          },
+        ),
+        MenuItemButton(
+          style: MenuItemButton.styleFrom(
+            backgroundColor: Colors.white,
+            foregroundColor: Colors.black,
+          ),
+          leadingIcon: Icon(Icons.drive_file_move_outline, color: Colors.black),
+          child: Text('Export with local file links',
+              style: TextStyle(color: Colors.black)),
+          onPressed: () {
+            if (actionInProgress) return;
+
+            final navigator = Navigator.of(context, rootNavigator: true);
+            runExportLocalLinksThenShowResults(navigator, ref, selectedMod);
           },
         ),
         MenuItemButton(

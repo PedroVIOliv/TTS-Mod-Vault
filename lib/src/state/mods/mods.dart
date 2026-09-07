@@ -20,6 +20,12 @@ import 'package:tts_mod_vault/src/state/enums/asset_type_enum.dart'
     show AssetTypeEnum;
 import 'package:tts_mod_vault/src/state/mods/mod_model.dart'
     show AudioAssetVisibility, InitialMod, Mod, ModTypeEnum;
+import 'package:tts_mod_vault/src/state/mods/local_links.dart'
+    show
+        ExportLocalLinksParams,
+        ExportLocalLinksResult,
+        exportLocalLinksIsolate,
+        localLinksOutputPath;
 import 'package:tts_mod_vault/src/state/mods/mods_isolates.dart'
     show
         InitialModsIsolateData,
@@ -1308,6 +1314,55 @@ class ModsStateNotifier extends AsyncNotifier<ModsState> {
     } catch (e) {
       debugPrint('updateModAsset error: $e');
       state = AsyncValue.error(e, StackTrace.current);
+    }
+  }
+
+  /// Writes a copy of the mod's JSON with every asset URL pointing at the
+  /// matching file in the local cache, leaving the original untouched.
+  ///
+  /// Fails without writing anything when an asset is not cached: a partially
+  /// localised copy would silently lose those assets in TTS.
+  Future<ExportLocalLinksResult> exportModWithLocalLinks(Mod mod) async {
+    try {
+      // The cached asset lists can predate files being downloaded or deleted
+      // outside the app, so the gate has to run against a fresh read.
+      final jsonURLs = await getUrlsByMod(mod, true);
+      final freshMod = await getCompleteMod(mod, jsonURLs);
+      updateMod(freshMod);
+
+      final assets = freshMod.getAllAssets();
+      final missingAssets =
+          assets.where((asset) => !asset.fileExists).toList();
+
+      if (missingAssets.isNotEmpty) {
+        return ExportLocalLinksResult.missingAssets(missingAssets);
+      }
+
+      final outputPath = localLinksOutputPath(freshMod.jsonFilePath);
+      if (await File(outputPath).exists()) {
+        return ExportLocalLinksResult.outputExists(outputPath);
+      }
+
+      final urlToFilePath = <String, String>{
+        for (final asset in assets)
+          if (asset.filePath != null) asset.url: asset.filePath!,
+      };
+
+      final rewrite = await compute(
+        exportLocalLinksIsolate,
+        ExportLocalLinksParams(
+          sourceJsonFilePath: freshMod.jsonFilePath,
+          outputJsonFilePath: outputPath,
+          urlToFilePath: urlToFilePath,
+        ),
+      );
+
+      await loadModsData();
+
+      return ExportLocalLinksResult.success(outputPath, rewrite);
+    } catch (e) {
+      debugPrint('exportModWithLocalLinks error: $e');
+      return ExportLocalLinksResult.failed(e.toString());
     }
   }
 
