@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path/path.dart' as p;
 import 'package:tts_mod_vault/src/state/mods/local_links.dart'
     show localFileUrl, localLinksOutputPath, rewriteUrlsToLocalFiles;
 
@@ -78,10 +79,12 @@ void main() {
 
   group('localLinksOutputPath', () {
     test('suffixes the file name with Local, keeping the directory', () {
-      expect(
-        localLinksOutputPath('/Users/me/Saves/TS_Save_12.json'),
-        '/Users/me/Saves/TS_Save_12 Local.json',
-      );
+      // Built with p.join so the expectation holds under either separator.
+      final output = localLinksOutputPath(p.join('Users', 'me', 'Saves',
+          'TS_Save_12.json'));
+
+      expect(p.dirname(output), p.join('Users', 'me', 'Saves'));
+      expect(p.basename(output), 'TS_Save_12 Local.json');
     });
   });
 }
