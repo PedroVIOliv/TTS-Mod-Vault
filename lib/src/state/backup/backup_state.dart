@@ -2,7 +2,6 @@ import 'dart:isolate' show SendPort;
 
 import 'package:tts_mod_vault/src/state/enums/asset_type_enum.dart'
     show AssetTypeEnum;
-import 'package:tts_mod_vault/src/state/mods/mod_model.dart' show Mod;
 
 enum BackupStatusEnum {
   idle,
@@ -52,30 +51,23 @@ class BackupCompleteMessage extends BackupMessage {
   final bool success;
   final String message;
 
-  BackupCompleteMessage(this.success, this.message);
+  final int assetCount;
+  BackupCompleteMessage(this.success, this.message, [this.assetCount = 0]);
 }
 
 // Data to send to isolate
 class BackupIsolateData {
-  final List<String> filePaths;
-  final String targetBackupFilePath;
-  final String modsParentPath;
-  final String savesParentPath;
-  final String savesPath;
-  final SendPort sendPort;
-
-  BackupIsolateData({
-    required this.filePaths,
-    required this.targetBackupFilePath,
-    required this.modsParentPath,
-    required this.savesParentPath,
-    required this.savesPath,
-    required this.sendPort,
-  });
-}
-
-class FilepathsIsolateData {
-  final Mod mod;
+  final String sourceJsonPath;
+  final String jsonEntryPath;
+  final String? thumbnail;
   final Map<AssetTypeEnum, String> directories;
-  FilepathsIsolateData(this.mod, this.directories);
+  final String targetBackupFilePath;
+  final SendPort sendPort;
+  BackupIsolateData(
+      {required this.sourceJsonPath,
+      required this.jsonEntryPath,
+      required this.directories,
+      required this.targetBackupFilePath,
+      required this.sendPort,
+      this.thumbnail});
 }

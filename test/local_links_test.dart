@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:tts_mod_vault/src/state/mods/local_links.dart'
@@ -40,8 +42,8 @@ void main() {
       );
 
       expect(
-        result.jsonString,
-        '{"ImageURL": "file:///cache/Images/httpsugc123ABC.png"}',
+        jsonDecode(result.jsonString),
+        {'ImageURL': 'file:///cache/Images/httpsugc123ABC.png'},
       );
       expect(result.replacedUrls, [url]);
       expect(result.notFoundUrls, isEmpty);
@@ -56,16 +58,17 @@ void main() {
         windows: false,
       );
 
-      expect(result.jsonString, '{"ImageURL": "https://example.com/other.png"}');
+      expect(jsonDecode(result.jsonString),
+          {'ImageURL': 'https://example.com/other.png'});
       expect(result.replacedUrls, isEmpty);
       expect(result.notFoundUrls, [url]);
     });
 
     test('matches the old cloud-3 URL still stored in the JSON', () {
       const normalizedUrl =
-          'https://steamusercontent-a.akamaihd.net/ugc/123/ABC/';
+          'https://steamusercontent-a.akamaihd.net/ugc/123/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/';
       const json =
-          '{"ImageURL": "http://cloud-3.steamusercontent.com/ugc/123/ABC/"}';
+          '{"ImageURL": "http://cloud-3.steamusercontent.com/ugc/123/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/"}';
 
       final result = rewriteUrlsToLocalFiles(
         jsonString: json,
@@ -73,7 +76,8 @@ void main() {
         windows: false,
       );
 
-      expect(result.jsonString, '{"ImageURL": "file:///cache/Images/a.png"}');
+      expect(jsonDecode(result.jsonString),
+          {'ImageURL': 'file:///cache/Images/a.png'});
       expect(result.replacedUrls, [normalizedUrl]);
       expect(result.notFoundUrls, isEmpty);
     });
@@ -82,8 +86,8 @@ void main() {
   group('localLinksOutputPath', () {
     test('suffixes the file name with Local, keeping the directory', () {
       // Built with p.join so the expectation holds under either separator.
-      final output = localLinksOutputPath(p.join('Users', 'me', 'Saves',
-          'TS_Save_12.json'));
+      final output = localLinksOutputPath(
+          p.join('Users', 'me', 'Saves', 'TS_Save_12.json'));
 
       expect(p.dirname(output), p.join('Users', 'me', 'Saves'));
       expect(p.basename(output), 'TS_Save_12 Local.json');

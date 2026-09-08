@@ -15,6 +15,7 @@ dependencies:
   flutter_localizations:
     sdk: flutter
 
+  crypto: ^3.0.6
   path: ^1.9.0
   hooks_riverpod: 2.6.1
   flutter_hooks: ^0.21.2

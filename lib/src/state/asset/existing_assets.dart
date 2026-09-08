@@ -1,17 +1,15 @@
-import 'dart:io' show Directory, File;
 import 'dart:isolate' show Isolate;
 
 import 'package:flutter/material.dart' show debugPrint;
 import 'package:hooks_riverpod/hooks_riverpod.dart' show Ref, StateNotifier;
-import 'package:path/path.dart' as path;
 import 'package:tts_mod_vault/src/state/asset/existing_assets_state.dart'
     show ExistingAssetsListsState;
 import 'package:tts_mod_vault/src/state/enums/asset_type_enum.dart'
     show AssetTypeEnum;
-import 'package:path/path.dart' as p;
 import 'package:tts_mod_vault/src/state/provider.dart' show directoriesProvider;
-import 'package:tts_mod_vault/src/utils.dart'
-    show getFileNameFromURL, newSteamUserContentUrl, oldCloudUrl;
+
+import 'asset_cache.dart';
+import 'asset_identity.dart';
 
 class ExistingAssetsNotifier extends StateNotifier<ExistingAssetsListsState> {
   final Ref ref;
@@ -30,7 +28,7 @@ class ExistingAssetsNotifier extends StateNotifier<ExistingAssetsListsState> {
       final directoryPath = directoryPaths[type] ?? '';
 
       final assetMap = await Isolate.run(
-        () => _getDirectoryFileNamesAndPaths(directoryPath),
+        () => scanAssetCache(directoryPath, type),
       );
 
       return (type, assetMap);
@@ -58,17 +56,10 @@ class ExistingAssetsNotifier extends StateNotifier<ExistingAssetsListsState> {
         ref.read(directoriesProvider.notifier).getDirectoryByType(type);
 
     final assetMap = await Isolate.run(
-      () => _getDirectoryFileNamesAndPaths(directoryPath),
+      () => scanAssetCache(directoryPath, type),
     );
 
     _updateStateByType(type, assetMap);
-  }
-
-  void addExistingAsset(AssetTypeEnum type, String filename, String filepath) {
-    final currentMap = _getAssetMapByType(type);
-    final updatedMap = Map<String, String>.from(currentMap)
-      ..[filename.toLowerCase()] = filepath;
-    _updateStateByType(type, updatedMap);
   }
 
   Map<String, String> _getAssetMapByType(AssetTypeEnum type) {
@@ -91,49 +82,13 @@ class ExistingAssetsNotifier extends StateNotifier<ExistingAssetsListsState> {
     };
   }
 
-  bool doesAssetFileExist(String assetFileName, AssetTypeEnum type) {
-    return _getAssetMapByType(type).containsKey(assetFileName.toLowerCase());
-  }
+  bool doesAssetFileExist(String assetFileName, AssetTypeEnum type) =>
+      resolveAssetPath(assetFileName, _getAssetMapByType(type)) != null;
 
-  String? getAssetFilePath(String assetFilename, AssetTypeEnum type) {
-    final filepath = _getAssetMapByType(type)[assetFilename.toLowerCase()];
-    return filepath != null ? path.normalize(filepath) : null;
-  }
-}
+  bool isAssetAmbiguous(String url, AssetTypeEnum type) =>
+      _getAssetMapByType(type)[assetCacheKey(url)] == '' ||
+      _getAssetMapByType(type)[legacyAssetCacheKey(url)] == '';
 
-///
-/// Top-level function required by Isolate.run
-/// Returns a map of filename -> filepath for O(1) lookups
-///
-Future<Map<String, String>> _getDirectoryFileNamesAndPaths(
-    String dirPath) async {
-  final directory = Directory(dirPath);
-
-  if (!directory.existsSync()) {
-    return <String, String>{};
-  }
-
-  final files = await directory
-      .list()
-      .where((entity) => entity is File)
-      .cast<File>()
-      .toList();
-
-  final assetMap = <String, String>{};
-
-  for (final file in files) {
-    final filename = p.basenameWithoutExtension(file.path);
-    final mappedFilename = filename.startsWith(getFileNameFromURL(oldCloudUrl))
-        ? filename.replaceFirst(getFileNameFromURL(oldCloudUrl),
-            getFileNameFromURL(newSteamUserContentUrl))
-        : filename;
-
-    // Keys are lowercased so lookups are case-insensitive. The URL-derived
-    // lookup name embeds the URL's file extension (e.g. ".pdf" vs ".PDF"),
-    // and TTS stores PDFs with either casing depending on the source URL, so a
-    // case-sensitive match would miss an existing file and re-download it.
-    assetMap[mappedFilename.toLowerCase()] = file.path;
-  }
-
-  return assetMap;
+  String? getAssetFilePath(String assetFilename, AssetTypeEnum type) =>
+      resolveAssetPath(assetFilename, _getAssetMapByType(type));
 }

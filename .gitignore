@@ -51,3 +51,6 @@ app.*.map.json
 
 # FVM Version Cache
 .fvm/
+# Local mod saves and recovery experiments (never published with app source)
+.local-recovery/
+local-saves/

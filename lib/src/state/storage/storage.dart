@@ -34,6 +34,10 @@ class Storage {
       _metadataBox = await Hive.openBox<String>(metadataBox);
       _appDataBox = await Hive.openBox<String>(appDataBox);
 
+      if (_metadataBox.get('AssetDiscoveryVersion') != '2') {
+        await _urlsBox.clear();
+        await _metadataBox.put('AssetDiscoveryVersion', '2');
+      }
       _initialized = true;
     }
   }

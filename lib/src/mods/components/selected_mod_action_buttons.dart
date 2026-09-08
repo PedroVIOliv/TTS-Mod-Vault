@@ -86,12 +86,12 @@ class SelectedModActionButtons extends HookConsumerWidget {
                     }
 
                     // 2. Create backup
-                    await backupRef.createBackup(currentMod, backupFolder);
+                    final backupSucceeded = await backupRef.createBackup(currentMod, backupFolder);
                     currentMod = await modsRef.updateModBackup(currentMod);
 
                     // 3. Delete assets if requested
                     Set<String> deletedFilenames = {};
-                    if (postBackupDeletion != PostBackupDeletionEnum.none) {
+                    if (backupSucceeded && postBackupDeletion != PostBackupDeletionEnum.none) {
                       final deleted =
                           await deleteRef.deleteModAssetsAfterBackup(
                         currentMod,

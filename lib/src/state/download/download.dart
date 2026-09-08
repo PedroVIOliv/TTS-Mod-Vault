@@ -1,5 +1,5 @@
 import 'dart:convert' show JsonEncoder, json;
-import 'dart:io' show File, FileMode, RandomAccessFile;
+import 'dart:io' show File, FileMode, RandomAccessFile, FileSystemException;
 
 import 'package:bson/bson.dart' show BsonBinary, BsonCodec;
 import 'package:dio/dio.dart'
@@ -38,13 +38,12 @@ import 'package:tts_mod_vault/src/state/provider.dart'
         selectedModProvider,
         settingsProvider;
 import 'package:tts_mod_vault/src/utils.dart'
-    show
-        getExtensionByType,
-        getFileNameFromURL,
-        newSteamUserContentUrl,
-        getPublishedFileDetailsUrl;
-
+    show getExtensionByType, getFileNameFromURL, getPublishedFileDetailsUrl;
 import 'package:path/path.dart' as p;
+
+import '../asset/asset_document.dart';
+import '../asset/asset_identity.dart';
+import '../asset/asset_cache.dart';
 
 class DownloadNotifier extends StateNotifier<DownloadState> {
   final Ref ref;
@@ -95,49 +94,47 @@ class DownloadNotifier extends StateNotifier<DownloadState> {
 
     final Set<String> allDownloaded = {};
 
-    allDownloaded.addAll(await downloadFiles(
-      modAssetListUrls: mod.assetLists.assetBundles
-          .where((e) => !e.fileExists)
-          .map((e) => e.url)
-          .toList(),
-      type: AssetTypeEnum.assetBundle,
-    ));
-
-    allDownloaded.addAll(await downloadFiles(
-      modAssetListUrls: mod.assetLists.audio
-          .where((e) => !e.fileExists)
-          .map((e) => e.url)
-          .toList(),
-      type: AssetTypeEnum.audio,
-    ));
-
-    allDownloaded.addAll(await downloadFiles(
-      modAssetListUrls: mod.assetLists.images
-          .where((e) => !e.fileExists)
-          .map((e) => e.url)
-          .toList(),
-      type: AssetTypeEnum.image,
-    ));
-
-    allDownloaded.addAll(await downloadFiles(
-      modAssetListUrls: mod.assetLists.models
-          .where((e) => !e.fileExists)
-          .map((e) => e.url)
-          .toList(),
-      type: AssetTypeEnum.model,
-    ));
-
-    allDownloaded.addAll(await downloadFiles(
-      modAssetListUrls: mod.assetLists.pdf
-          .where((e) => !e.fileExists)
-          .map((e) => e.url)
-          .toList(),
-      type: AssetTypeEnum.pdf,
-    ));
-
-    ref
-        .read(logProvider.notifier)
-        .addSuccess('Download completed: ${mod.saveName}');
+    try {
+      final references =
+          collectAssetReferences(await File(mod.jsonFilePath).readAsString());
+      var failed = false;
+      for (final type in AssetTypeEnum.values) {
+        try {
+          allDownloaded.addAll(await downloadFiles(
+            modAssetListUrls: references
+                .where((r) => r.type == type)
+                .map((r) => r.url)
+                .toSet()
+                .toList(),
+            type: type,
+          ));
+        } catch (e) {
+          failed = true;
+          ref
+              .read(logProvider.notifier)
+              .addError('Could not resolve ${type.label}: $e');
+        }
+      }
+      final missing = references
+          .where((r) => !ref
+              .read(existingAssetListsProvider.notifier)
+              .doesAssetFileExist(r.url, r.type))
+          .map((r) => r.url)
+          .toSet()
+          .length;
+      if (failed || missing > 0 || state.cancelledDownloads) {
+        ref.read(logProvider.notifier).addError(
+            'Download incomplete: ${mod.saveName}; $missing unresolved asset(s).');
+      } else {
+        ref
+            .read(logProvider.notifier)
+            .addSuccess('Download completed: ${mod.saveName}');
+      }
+    } catch (e) {
+      ref
+          .read(logProvider.notifier)
+          .addError('Download failed: ${mod.saveName}: $e');
+    }
 
     resetState();
     return allDownloaded;
@@ -241,11 +238,27 @@ class DownloadNotifier extends StateNotifier<DownloadState> {
       state = state.copyWith(cancelledDownloads: false);
     }
 
+    await ref
+        .read(existingAssetListsProvider.notifier)
+        .setExistingAssetsListByType(type);
     final urls = modAssetListUrls.where((url) {
-      final fileName = getFileNameFromURL(url);
+      if (ref
+          .read(existingAssetListsProvider.notifier)
+          .isAssetAmbiguous(url, type)) {
+        throw StateError('Conflicting cached bytes for $url');
+      }
+      if (localPathFromUrl(url) != null) {
+        if (!ref
+            .read(existingAssetListsProvider.notifier)
+            .doesAssetFileExist(url, type)) {
+          throw FileSystemException(
+              'Missing local asset; restore its backup', url);
+        }
+        return false;
+      }
       return !ref
           .read(existingAssetListsProvider.notifier)
-          .doesAssetFileExist(fileName, type);
+          .doesAssetFileExist(url, type);
     }).toList();
 
     // Track successful downloads
@@ -315,9 +328,13 @@ class DownloadNotifier extends StateNotifier<DownloadState> {
           } on DioException catch (e) {
             // Check is Steam CDN url missing a trailing '/'
             if (e.response?.statusCode == 404 &&
-                url.startsWith(newSteamUserContentUrl) &&
-                !url.endsWith('/')) {
-              await _downloadUrlWithRetry('$url/', tempPath, cancelToken,
+                steamContentToken(url) != null &&
+                !Uri.parse(url).path.endsWith('/')) {
+              final uri = Uri.parse(url);
+              await _downloadUrlWithRetry(
+                  uri.replace(path: '${uri.path}/').toString(),
+                  tempPath,
+                  cancelToken,
                   onProgress: onProgress);
             } else {
               rethrow;
@@ -343,10 +360,11 @@ class DownloadNotifier extends StateNotifier<DownloadState> {
           } else {
             final finalPath = p.join(directory,
                 fileName + getExtensionByType(type, tempPath, bytes));
+            await validateAssetFile(tempPath, type);
             await tempFile.rename(finalPath);
 
             // Track successful download
-            successfulDownloads.add((fileName, finalPath));
+            successfulDownloads.add((originalUrl, finalPath));
           }
         } catch (e) {
           if (tempPath != null) {
@@ -395,9 +413,7 @@ class DownloadNotifier extends StateNotifier<DownloadState> {
       if (successfulDownloads.isNotEmpty) {
         final existingAssetsNotifier =
             ref.read(existingAssetListsProvider.notifier);
-        for (final (filename, filepath) in successfulDownloads) {
-          existingAssetsNotifier.addExistingAsset(type, filename, filepath);
-        }
+        await existingAssetsNotifier.setExistingAssetsListByType(type);
       }
 
       if (!downloadingAllFiles) {

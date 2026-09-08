@@ -25,6 +25,8 @@ import 'package:tts_mod_vault/src/state/mods/mods_isolates.dart'
 import 'package:tts_mod_vault/src/state/provider.dart'
     show directoriesProvider, existingAssetListsProvider, modsProvider;
 
+import 'recovery_bundle.dart';
+
 /// The user's choice when an imported backup's JSON is older than the local
 /// (already imported) JSON file.
 enum JsonConflictChoice { keepCurrent, useBackup, cancel }
@@ -101,6 +103,7 @@ class ImportBackupNotifier extends StateNotifier<ImportBackupState> {
     try {
       final bytes = await File(filePath).readAsBytes();
       final archive = ZipDecoder().decodeBytes(bytes);
+      final inventory = verifyRecoveryArchive(archive);
       final modsDir = Directory(ref.read(directoriesProvider).modsDir);
       final savesDir = Directory(ref.read(directoriesProvider).savesDir);
       final savedObjectsDir =
@@ -111,9 +114,17 @@ class ImportBackupNotifier extends StateNotifier<ImportBackupState> {
       };
       String? importedJsonFilePath;
 
-      String targetDirFor(String filename) => filename.startsWith('Saves')
-          ? savesDir.parent.path
-          : modsDir.parent.path;
+      String targetPathFor(String filename) {
+        final parts = filename.split('/');
+        final type = _getAssetTypeFromPath(filename);
+        if (type != null && parts.length >= 3 && parts.first == 'Mods') {
+          return p.join(
+              ref.read(directoriesProvider.notifier).getDirectoryByType(type),
+              parts.skip(2).join('/'));
+        }
+        final root = parts.first == 'Saves' ? savesDir.path : modsDir.path;
+        return p.join(root, parts.skip(1).join('/'));
+      }
 
       // Pre-pass: locate the JSON entry, capture its zip-relative location, and
       // extract the backup JSON's internal save date so we can detect a
@@ -162,7 +173,7 @@ class ImportBackupNotifier extends StateNotifier<ImportBackupState> {
       if (jsonEntryName != null) {
         jsonTargetPath = effectiveTargetDir != null
             ? p.join(effectiveTargetDir, p.basename(jsonEntryName))
-            : File('${targetDirFor(jsonEntryName)}/$jsonEntryName').path;
+            : targetPathFor(jsonEntryName);
 
         // Determine mod type based on the final destination path
         if (jsonTargetPath.contains(savedObjectsDir.path)) {
@@ -222,11 +233,23 @@ class ImportBackupNotifier extends StateNotifier<ImportBackupState> {
         }
       }
 
-      for (final file in archive) {
+      // Commit the save last: failed asset restoration must not install a new
+      // JSON whose dependencies were not restored.
+      final ordered = archive.files
+          .where((f) => f.isFile && f.name != recoveryInventoryPath)
+          .toList()
+        ..sort((a, b) => (_isJsonFile(a.name) ? 1 : 0)
+            .compareTo(_isJsonFile(b.name) ? 1 : 0));
+      for (final file in ordered) {
         if (file.isFile) {
           final filename = file.name;
 
-          final data = file.content as List<int>;
+          var data = file.content as List<int>;
+          if (_isJsonFile(filename) && inventory != null && !skipJsonWrite) {
+            final rewritten = await restoreRecoveryJson(
+                utf8.decode(data), inventory, targetPathFor);
+            data = utf8.encode(rewritten);
+          }
 
           // Redirect the JSON and its sibling image (entries sharing the JSON's
           // zip directory) into the target mod's current folder when known.
@@ -235,7 +258,7 @@ class ImportBackupNotifier extends StateNotifier<ImportBackupState> {
               p.equals(p.dirname(filename), jsonEntryDir);
           final outputFile = redirectToTargetDir
               ? File(p.join(effectiveTargetDir, p.basename(filename)))
-              : File('${targetDirFor(filename)}/$filename');
+              : File(targetPathFor(filename));
           final isJson = _isJsonFile(filename);
           if (isJson) {
             importedJsonFilePath = outputFile.path;
@@ -261,29 +284,25 @@ class ImportBackupNotifier extends StateNotifier<ImportBackupState> {
             state = state.copyWith(
                 currentCount: archive.files.indexOf(file) + 1,
                 totalCount: archive.files.length);
-            await outputFile.create(recursive: true);
-            await outputFile.writeAsBytes(data);
+            await outputFile.parent.create(recursive: true);
+            final staging = await outputFile.parent.createTemp('.restore-');
+            try {
+              final temp = File(p.join(staging.path, 'payload'));
+              await temp.writeAsBytes(data, flush: true);
+              await commitFile(temp.path, outputFile.path);
+            } finally {
+              await staging.delete(recursive: true);
+            }
           } catch (e) {
-            debugPrint(
-                'importBackup failed for $filename because of error: $e');
+            throw FileSystemException('Restore failed: $e', filename);
           }
         }
       }
 
       if (importedJsonFilePath != null && modType != null) {
-        // Add only the newly extracted assets instead of rescanning all directories
-        for (final entry in extractedAssets.entries) {
-          final assetType = entry.key;
-          final assets = entry.value;
-
-          for (final asset in assets.entries) {
-            ref.read(existingAssetListsProvider.notifier).addExistingAsset(
-                  assetType,
-                  asset.key,
-                  asset.value,
-                );
-          }
-        }
+        await ref
+            .read(existingAssetListsProvider.notifier)
+            .loadExistingAssetsLists();
 
         await ref.read(modsProvider.notifier).addSingleMod(
               importedJsonFilePath,
@@ -291,10 +310,13 @@ class ImportBackupNotifier extends StateNotifier<ImportBackupState> {
             );
 
         // Return all extracted asset filenames for shared asset refresh
-        return extractedAssets.values.expand((assets) => assets.keys).toSet();
+        return extractedAssets.values.expand((assets) => assets.keys).toSet()
+          ..addAll((inventory?['assets'] as List? ?? [])
+              .map((a) => a['url'] as String));
       }
     } catch (e) {
       debugPrint('importBackup error: $e');
+      rethrow;
     }
 
     return {};
@@ -304,9 +326,11 @@ class ImportBackupNotifier extends StateNotifier<ImportBackupState> {
     final filePath = p.normalize(inputPath);
 
     final isJsonFile = p.extension(filePath).toLowerCase() == '.json';
-    final containsWorkshop = p.split(filePath).contains('Workshop');
-
-    return isJsonFile && containsWorkshop;
+    final parts = p.split(filePath);
+    return isJsonFile &&
+        (parts.contains('Workshop') ||
+            parts.contains('Saves') ||
+            parts.contains('Saved Objects'));
   }
 
   AssetTypeEnum? _getAssetTypeFromPath(String filePath) {
@@ -314,11 +338,9 @@ class ImportBackupNotifier extends StateNotifier<ImportBackupState> {
     final pathParts =
         p.split(normalizedPath).map((part) => part.toLowerCase()).toList();
 
-    // Check if path contains any of the asset type directory names (case-insensitive)
+    if (pathParts.length < 3 || pathParts.first != 'mods') return null;
     for (final assetType in AssetTypeEnum.values) {
-      if (pathParts.contains(assetType.label.toLowerCase())) {
-        return assetType;
-      }
+      if (pathParts[1] == assetType.label.toLowerCase()) return assetType;
     }
 
     return null;

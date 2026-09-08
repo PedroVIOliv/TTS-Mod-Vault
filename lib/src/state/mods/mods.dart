@@ -62,9 +62,12 @@ import 'package:tts_mod_vault/src/utils.dart'
     show
         getBackupFilename,
         getBackupFilenameByMod,
-        getFileNameFromURL,
         newSteamUserContentUrl,
         oldCloudUrl;
+
+import '../asset/asset_identity.dart';
+import '../backup/recovery_bundle.dart';
+import '../asset/asset_cache.dart';
 
 class ModsStateNotifier extends AsyncNotifier<ModsState> {
   @override
@@ -913,6 +916,9 @@ class ModsStateNotifier extends AsyncNotifier<ModsState> {
     String? excludeJsonFileName,
   ) {
     final affectedModJsonFileNames = <String>{};
+    final identities = affectedFilenames
+        .expand((value) => [assetCacheKey(value), legacyAssetCacheKey(value)])
+        .toSet();
 
     for (final entry in allModUrls.entries) {
       final modJsonFileName = entry.key;
@@ -922,7 +928,8 @@ class ModsStateNotifier extends AsyncNotifier<ModsState> {
       if (urls == null) continue;
 
       for (final url in urls.keys) {
-        if (affectedFilenames.contains(getFileNameFromURL(url))) {
+        if (identities.contains(assetCacheKey(url)) ||
+            identities.contains(legacyAssetCacheKey(url))) {
           affectedModJsonFileNames.add(modJsonFileName);
           break;
         }
@@ -1144,13 +1151,10 @@ class ModsStateNotifier extends AsyncNotifier<ModsState> {
     final assetMap = _getAssetMapByType(type);
 
     return urls.map((url) {
-      final normalizedUrl = url.replaceAll(oldCloudUrl, newSteamUserContentUrl);
-      final filename = getFileNameFromURL(normalizedUrl);
-      final filepath =
-          assetMap[filename.toLowerCase()]; // O(1) case-insensitive lookup!
+      final filepath = resolveAssetPath(url, assetMap);
 
       return Asset(
-        url: normalizedUrl,
+        url: url,
         fileExists: filepath != null,
         type: type,
         filePath: filepath,
@@ -1178,18 +1182,17 @@ class ModsStateNotifier extends AsyncNotifier<ModsState> {
 
     for (final element in data.entries) {
       for (final assetType in AssetTypeEnum.values) {
-        if (assetType.subtypes.contains(element.value)) {
+        if (element.value.split('|').any(assetType.subtypes.contains)) {
           // Determine if audio should be ignored for this specific mod
           if (assetType == AssetTypeEnum.audio) {
             hasAudioInJson = true;
 
             if (ignoreAudio) {
-              break; // Skip adding to urlsByType
+              continue;
             }
           }
 
           urlsByType[assetType]!.add(element.key);
-          break;
         }
       }
     }
@@ -1324,36 +1327,26 @@ class ModsStateNotifier extends AsyncNotifier<ModsState> {
   /// localised copy would silently lose those assets in TTS.
   Future<ExportLocalLinksResult> exportModWithLocalLinks(Mod mod) async {
     try {
-      // The cached asset lists can predate files being downloaded or deleted
-      // outside the app, so the gate has to run against a fresh read.
-      final jsonURLs = await getUrlsByMod(mod, true);
-      final freshMod = await getCompleteMod(mod, jsonURLs);
-      updateMod(freshMod);
-
-      final assets = freshMod.getAllAssets();
-      final missingAssets =
-          assets.where((asset) => !asset.fileExists).toList();
-
-      if (missingAssets.isNotEmpty) {
-        return ExportLocalLinksResult.missingAssets(missingAssets);
-      }
-
-      final outputPath = localLinksOutputPath(freshMod.jsonFilePath);
+      final source = await File(mod.jsonFilePath).readAsString();
+      final resolved = await resolveRecoveryAssets(source, {
+        for (final type in AssetTypeEnum.values)
+          type: ref.read(directoriesProvider.notifier).getDirectoryByType(type),
+      });
+      final outputPath = localLinksOutputPath(mod.jsonFilePath);
       if (await File(outputPath).exists()) {
         return ExportLocalLinksResult.outputExists(outputPath);
       }
 
       final urlToFilePath = <String, String>{
-        for (final asset in assets)
-          if (asset.filePath != null) asset.url: asset.filePath!,
+        for (final asset in resolved) asset.reference.url: asset.path,
       };
 
       final rewrite = await compute(
         exportLocalLinksIsolate,
         ExportLocalLinksParams(
-          sourceJsonFilePath: freshMod.jsonFilePath,
+          sourceJsonFilePath: mod.jsonFilePath,
           outputJsonFilePath: outputPath,
-          sourceImageFilePath: freshMod.imageFilePath,
+          sourceImageFilePath: mod.imageFilePath,
           urlToFilePath: urlToFilePath,
         ),
       );
@@ -1421,8 +1414,7 @@ class ModsStateNotifier extends AsyncNotifier<ModsState> {
         parentFolderName: mod.parentFolderName,
         saveName: trimmedName,
         createdAtTimestamp: mod.createdAtTimestamp,
-        lastModifiedTimestamp:
-            fileStat.modified.microsecondsSinceEpoch ~/ 1000,
+        lastModifiedTimestamp: fileStat.modified.microsecondsSinceEpoch ~/ 1000,
         dateTimeStamp: mod.dateTimeStamp,
         imageFilePath: mod.imageFilePath,
         backup: updatedBackup,

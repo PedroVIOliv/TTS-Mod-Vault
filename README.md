@@ -35,12 +35,43 @@ TTS Mod Vault is an actively maintained alternative to [TTS Mod Backup](https://
 
 ### URL Management
 
-- **Automatic URL handling** – Handles files using old URL format (`http://cloud-3.steamusercontent.com/` → `https://steamusercontent-a.akamaihd.net/`)
+- **Steam cache matching** – Finds identical Steam asset content across historical UGC IDs and cloud/CDN URL variants
 - **Replace URL** – Replace a asset URL with a new one
 - **Update URLs** – Replace prefixes or entire URLs, either for a single item or as a bulk action
 - **Update URL presets** – Save and reuse URL replacement presets in Settings
 - **Check for shared asset URLs** – Detect assets shared across mods
 - **Check for invalid asset URLs** – Find broken or invalid asset links
+
+### Recoverable local backups
+
+New `.ttsmod` backups include a versioned `Vault/Recovery.json` inventory with
+asset references, archive paths, byte lengths and SHA-256 checksums. Backup
+creation checks every declared dependency (including audio hidden by display
+settings), verifies the archive, and only then replaces an older backup. Missing,
+unreadable, invalid or conflicting assets stop the backup. Failed or unverified
+backups cannot trigger automatic asset deletion.
+
+Steam cache lookup recognizes UGC content tokens across historical upload IDs,
+HTTP/HTTPS and the Steam cloud/akamai host variants. It uses real files, compares
+conflicting candidates, and never fabricates a cache path. Filename tokens are
+lookup hints; independently calculated checksums protect archived bytes.
+
+Export local links validates files again and rewrites JSON, nested saved state
+and complete Lua string literals without substring replacement. Restoring a new
+verified backup checks every payload before installing the save, and rebases its
+asset references to local paths under the selected restoration directories.
+Existing legacy backups remain importable, but have no integrity inventory.
+
+For a mod with a recovery manifest: download all assets, make a verified backup,
+export local links (or import the verified backup on another machine), and run
+the mod's unpack/upload/repack workflow. Preserve the `.ttsmod` archive: an
+absolute-path local JSON alone is not a portable backup. Test the resulting
+online save with an empty cache and the original asset URLs unavailable.
+
+Static discovery requires ordinary TTS asset fields, including contained objects,
+states and serialized JSON. Arbitrary URLs computed by Lua, external scripts or
+other runtime code must be exposed through a declarative manifest. Header checks
+and archive checksums do not replace a TTS loading test for media/Unity compatibility.
 
 ### Sort, Filter & Browse
 

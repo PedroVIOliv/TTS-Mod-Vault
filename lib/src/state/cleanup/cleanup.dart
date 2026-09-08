@@ -10,8 +10,8 @@ import 'package:tts_mod_vault/src/state/enums/asset_type_enum.dart'
     show AssetTypeEnum;
 import 'package:tts_mod_vault/src/state/provider.dart'
     show directoriesProvider, modsProvider, storageProvider;
-import 'package:tts_mod_vault/src/utils.dart'
-    show getFileNameFromURL, newSteamUserContentUrl, oldCloudUrl;
+
+import '../asset/asset_identity.dart';
 
 class CleanupNotifier extends StateNotifier<CleanUpState> {
   final Ref ref;
@@ -52,7 +52,8 @@ class CleanupNotifier extends StateNotifier<CleanUpState> {
               // Lowercased for case-insensitive matching against on-disk files;
               // a URL's extension casing (e.g. ".pdf" vs ".PDF") must not cause
               // a referenced file to be treated as an orphan and deleted.
-              files.add(getFileNameFromURL(url.key).toLowerCase());
+              files.add(assetCacheKey(url.key));
+              files.add(legacyAssetCacheKey(url.key));
             }
           }
 
@@ -189,23 +190,7 @@ Future<List<String>> processDirectoryInIsolate(
         // Ignore rawt/rawm files that are not from URL download
         if (fileName.startsWith("file")) continue;
 
-        // In case of old url naming scheme rename to new url to match existing assets lists
-        if (fileName.startsWith(getFileNameFromURL(oldCloudUrl))) {
-          final originalFileName = fileName;
-
-          fileName = fileName.replaceFirst(getFileNameFromURL(oldCloudUrl),
-              getFileNameFromURL(newSteamUserContentUrl));
-
-          // Check if old url file has a duplicate with new url file
-          final newUrlFilepath =
-              file.path.replaceFirst(originalFileName, fileName);
-          if (await File(newUrlFilepath).exists()) {
-            filesToDelete.add(file.path);
-            continue;
-          }
-        }
-
-        if (!data.referencedFileNames.contains(fileName.toLowerCase())) {
+        if (!data.referencedFileNames.contains(assetCacheKey(fileName))) {
           filesToDelete.add(file.path);
         }
       }

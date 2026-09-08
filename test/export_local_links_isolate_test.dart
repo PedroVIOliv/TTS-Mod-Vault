@@ -25,6 +25,8 @@ void main() {
     await File(sourcePath).writeAsString(sourceJson);
 
     final cachePath = p.join(tempDir.path, 'My Cache', 'a.png');
+    await File(cachePath).create(recursive: true);
+    await File(cachePath).writeAsBytes([137, 80, 78, 71, 13, 10, 26, 10]);
 
     final result = await exportLocalLinksIsolate(
       ExportLocalLinksParams(

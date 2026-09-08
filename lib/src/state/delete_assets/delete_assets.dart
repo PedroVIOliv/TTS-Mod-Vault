@@ -1,18 +1,22 @@
 import 'dart:io' show File;
 import 'dart:isolate' show Isolate;
 
+import 'package:archive/archive.dart' show ZipDecoder;
 import 'package:hooks_riverpod/hooks_riverpod.dart' show Notifier;
 import 'package:tts_mod_vault/src/state/delete_assets/delete_assets_state.dart'
     show DeleteAssetsState, DeleteAssetsStatusEnum, SharedAssetInfo, ScanResult;
 import 'package:tts_mod_vault/src/state/mods/mod_model.dart'
     show Mod, ModTypeEnum;
 import 'package:tts_mod_vault/src/state/provider.dart'
-    show existingAssetListsProvider, modsProvider, storageProvider;
-import 'package:tts_mod_vault/src/utils.dart' show getFileNameFromURL;
+    show existingAssetListsProvider, modsProvider, storageProvider, logProvider;
 import 'package:tts_mod_vault/src/state/bulk_actions/bulk_actions_state.dart'
     show PostBackupDeletionEnum;
 import 'package:tts_mod_vault/src/state/enums/asset_type_enum.dart'
     show AssetTypeEnum;
+
+import '../backup/recovery_bundle.dart';
+import '../asset/asset_cache.dart';
+import '../asset/asset_identity.dart';
 
 class DeleteAssetsNotifier extends Notifier<DeleteAssetsState> {
   DeleteAssetsNotifier();
@@ -113,7 +117,7 @@ class DeleteAssetsNotifier extends Notifier<DeleteAssetsState> {
       if (urls == null) continue;
 
       for (final url in urls.keys) {
-        final filename = getFileNameFromURL(url);
+        final filename = assetCacheKey(url);
         assetUsageMap.putIfAbsent(filename, () => {}).add(modJsonFileName);
       }
     }
@@ -127,16 +131,16 @@ class DeleteAssetsNotifier extends Notifier<DeleteAssetsState> {
     final Map<String, List<String>> sharedAssetDetails = {};
 
     for (final url in selectedModAssetUrls) {
-      final filename = getFileNameFromURL(url);
+      final filename = assetCacheKey(url);
       final modsUsingAsset = assetUsageMap[filename] ?? {};
 
       // Only delete if this asset is used by exactly one mod (the selected mod)
       if (modsUsingAsset.length == 1 &&
           modsUsingAsset.contains(selectedModJsonFileName)) {
-        filesToDelete.add(filename);
+        filesToDelete.add(url);
       } else if (modsUsingAsset.length > 1) {
         // Track shared file for optional deletion
-        sharedFilesToDelete.add(filename);
+        sharedFilesToDelete.add(url);
 
         // Track which mods are using this asset (excluding the selected mod)
         final sharingMods = <String>[];
@@ -220,24 +224,22 @@ class DeleteAssetsNotifier extends Notifier<DeleteAssetsState> {
       List<String> fileNames, existingAssets) async {
     for (final fileName in fileNames) {
       try {
-        // Search for the file in all asset type directories
+        // Keep the original URL so query-named exact cache candidates can be
+        // resolved as well as the shared Steam content identity.
         String? filePath;
-
-        // Check each asset type map for the filename (keys are lowercased)
-        final key = fileName.toLowerCase();
-        if (existingAssets.assetBundles.containsKey(key)) {
-          filePath = existingAssets.assetBundles[key];
-        } else if (existingAssets.audio.containsKey(key)) {
-          filePath = existingAssets.audio[key];
-        } else if (existingAssets.images.containsKey(key)) {
-          filePath = existingAssets.images[key];
-        } else if (existingAssets.models.containsKey(key)) {
-          filePath = existingAssets.models[key];
-        } else if (existingAssets.pdf.containsKey(key)) {
-          filePath = existingAssets.pdf[key];
+        for (final cache in [
+          existingAssets.assetBundles,
+          existingAssets.audio,
+          existingAssets.images,
+          existingAssets.models,
+          existingAssets.pdf
+        ]) {
+          filePath =
+              resolveAssetPath(fileName, Map<String, String>.from(cache));
+          if (filePath != null) break;
         }
 
-        if (filePath != null) {
+        if (filePath != null && filePath.isNotEmpty) {
           final file = File(filePath);
           if (await file.exists()) {
             await file.delete();
@@ -285,7 +287,7 @@ class DeleteAssetsNotifier extends Notifier<DeleteAssetsState> {
     required Map<String, String> modNameMap,
     required Map<String, ModTypeEnum> modTypeMap,
   }) {
-    final filename = getFileNameFromURL(assetUrl);
+    final filename = assetCacheKey(assetUrl);
     final sharingMods = <ModTypeEnum, List<String>>{};
 
     for (final modEntry in allModUrls.entries) {
@@ -296,7 +298,7 @@ class DeleteAssetsNotifier extends Notifier<DeleteAssetsState> {
       if (urls == null) continue;
 
       for (final url in urls.keys) {
-        if (getFileNameFromURL(url) == filename) {
+        if (assetCacheKey(url) == filename) {
           final type = modTypeMap[modJsonFileName] ?? ModTypeEnum.mod;
           final name = modNameMap[modJsonFileName] ?? modJsonFileName;
           sharingMods.putIfAbsent(type, () => []).add(name);
@@ -337,6 +339,33 @@ class DeleteAssetsNotifier extends Notifier<DeleteAssetsState> {
     PostBackupDeletionEnum deletionOption,
   ) async {
     if (deletionOption == PostBackupDeletionEnum.none) {
+      return [];
+    }
+
+    // Deletion after a skipped/old backup is safe only if that archive actually
+    // contains the current bytes. Legacy/unverified backups cannot authorize it.
+    try {
+      final backup = mod.backup;
+      if (backup == null) throw StateError('No verified backup');
+      final archive =
+          ZipDecoder().decodeBytes(await File(backup.filepath).readAsBytes());
+      final inventory = verifyRecoveryArchive(archive);
+      if (inventory == null) {
+        throw StateError('Backup has no integrity inventory');
+      }
+      for (final asset in mod.getAllAssets().where((a) => a.filePath != null)) {
+        final digest = await assetDigest(asset.filePath!);
+        final backedUp = (inventory['assets'] as List).any((entry) =>
+            entry['type'] == asset.type.name &&
+            assetCacheKey(entry['url']) == assetCacheKey(asset.url) &&
+            inventory['files'][entry['path']]['sha256'] == digest);
+        if (!backedUp) {
+          throw StateError(
+              'Current asset is not verified in the backup: ${asset.url}');
+        }
+      }
+    } catch (e) {
+      ref.read(logProvider.notifier).addError('Assets retained: $e');
       return [];
     }
 

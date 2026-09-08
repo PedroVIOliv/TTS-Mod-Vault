@@ -210,7 +210,9 @@ class BulkActionsNotifier extends StateNotifier<BulkActionsState> {
 
       modsNotifier.setSelectedMod(currentMod);
       if (performBackup) {
-        await backupNotifier.createBackup(currentMod, modBackupFolder);
+        if (!await backupNotifier.createBackup(currentMod, modBackupFolder)) {
+          continue;
+        }
         currentMod = await modsNotifier.updateModBackup(currentMod);
       }
 
@@ -344,7 +346,9 @@ class BulkActionsNotifier extends StateNotifier<BulkActionsState> {
       final selectedMod = ref.read(selectedModProvider);
       if (selectedMod != null) {
         if (performBackup) {
-          await backupNotifier.createBackup(selectedMod, modBackupFolder);
+          if (!await backupNotifier.createBackup(selectedMod, modBackupFolder)) {
+            continue;
+          }
           currentMod = await modsNotifier.updateModBackup(selectedMod);
         }
 
@@ -733,13 +737,19 @@ class BulkActionsNotifier extends StateNotifier<BulkActionsState> {
           statusMessage:
               'Importing "$fileName" (${i + 1}/${filePaths.length})');
 
-      final importedFilenames =
-          await ref.read(importBackupProvider.notifier).importBackupFromPath(
-                path,
-                onJsonConflict: onJsonConflict,
-                targetJsonDir: targetJsonDir,
-              );
-      allImportedFilenames.addAll(importedFilenames);
+      try {
+        final importedFilenames =
+            await ref.read(importBackupProvider.notifier).importBackupFromPath(
+                  path,
+                  onJsonConflict: onJsonConflict,
+                  targetJsonDir: targetJsonDir,
+                );
+        allImportedFilenames.addAll(importedFilenames);
+      } catch (e) {
+        ref
+            .read(logProvider.notifier)
+            .addError('Import failed for $fileName: $e');
+      }
     }
 
     // Refresh other mods that share any of the imported assets

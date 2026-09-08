@@ -14,8 +14,10 @@ import 'package:tts_mod_vault/src/state/enums/asset_type_enum.dart'
     show AssetTypeEnum;
 import 'package:tts_mod_vault/src/state/mods/mod_model.dart'
     show AudioAssetVisibility, Mod, ModTypeEnum, InitialMod;
-import 'package:tts_mod_vault/src/utils.dart'
-    show getFileNameFromURL, newSteamUserContentUrl, oldCloudUrl;
+import 'package:tts_mod_vault/src/utils.dart' show getFileNameFromURL;
+
+import '../asset/asset_document.dart';
+import '../asset/asset_cache.dart';
 
 // Two branches:
 // 1. Anything with a scheme (https://, steam://, s3://, ...) is taken verbatim
@@ -228,82 +230,11 @@ Future<Map<String, String>> extractUrlsFromJson(String filePath) async {
 }
 
 Map<String, String> extractUrlsFromJsonString(String jsonString) {
-  Map<String, String> urls = {};
-
-  try {
-    // Use regex extraction instead of full JSON parsing. A single pass handles
-    // both plain JSON and asset URLs embedded as escaped JSON in Lua scripts.
-    urls = _extractUrlsWithRegex(jsonString);
-  } catch (e) {
-    debugPrint('extractUrlsFromJson error: $e');
+  final fields = <String, Set<String>>{};
+  for (final reference in collectAssetReferences(jsonString)) {
+    fields.putIfAbsent(reference.url, () => {}).add(reference.field);
   }
-
-  Map<String, String> finalUrls = {};
-
-  for (final url in urls.entries) {
-    if (url.key.startsWith("file:/")) {
-      continue;
-    }
-
-    final processedUrls = _processUrl(url.key, url.value);
-    finalUrls.addAll(processedUrls);
-  }
-
-  return finalUrls.map((key, value) => MapEntry(
-        key.replaceAll(oldCloudUrl, newSteamUserContentUrl),
-        value,
-      ));
-}
-
-// Separates one url into multiple entries and/or removes {prefix} such as {en}
-// Example input urlKey: {en}https://www.en-example.com{fr}https://www.fr-example.com
-Map<String, String> _processUrl(String urlKey, String value) {
-  final matches = urlRegex.allMatches(urlKey);
-
-  final urls = matches.map((m) => m.group(0)).nonNulls.toList();
-
-  Map<String, String> finalUrls = {};
-  for (final url in urls) {
-    final trimmedUrl =
-        url.replaceAll(RegExp(r'\\[rn]'), ''); // Remove literal \r and \n
-    finalUrls[trimmedUrl] = value;
-  }
-
-  return finalUrls;
-}
-
-// Single combined regex built once from all AssetTypeEnum subtypes.
-// - alternation of every asset key in one pass (group 1 = key)
-// - \\* before each quote tolerates escaped JSON embedded in Lua scripts
-//   (e.g. \"MeshURL\": \"https://...\" spawned at runtime via spawnObjectJSON)
-// - value capture (group 2) stops at the first " or \, i.e. the quote or the
-//   \" that closes the value
-final _assetUrlRegex = (() {
-  final assetKeys = [
-    for (final value in AssetTypeEnum.values) ...value.subtypes,
-  ].map(RegExp.escape).join('|');
-
-  return RegExp(
-    '\\\\*"($assetKeys)\\\\*"\\s*:\\s*\\\\*"([^"\\\\]*)',
-    caseSensitive: true,
-  );
-})();
-
-// Fast regex-based URL extraction using exact AssetTypeEnum subtypes.
-// Matches both plain JSON ("MeshURL": "...") and asset URLs embedded as escaped
-// JSON inside Lua scripts (\"MeshURL\": \"...\") in a single pass.
-Map<String, String> _extractUrlsWithRegex(String jsonString) {
-  Map<String, String> urls = {};
-
-  for (final match in _assetUrlRegex.allMatches(jsonString)) {
-    final key = match.group(1);
-    final url = match.group(2);
-    if (key != null && url != null && url.isNotEmpty) {
-      urls[url] = key;
-    }
-  }
-
-  return urls;
+  return fields.map((url, types) => MapEntry(url, types.join('|')));
 }
 
 /// Builds AssetLists from URLs with O(1) existence checks
@@ -330,7 +261,7 @@ Map<String, String> _extractUrlsWithRegex(String jsonString) {
 
   for (final entry in urlsData.entries) {
     for (final assetType in AssetTypeEnum.values) {
-      if (assetType.subtypes.contains(entry.value)) {
+      if (entry.value.split('|').any(assetType.subtypes.contains)) {
         // Check if this is an audio asset
         if (assetType == AssetTypeEnum.audio) {
           hasAudioInJson = true;
@@ -346,12 +277,11 @@ Map<String, String> _extractUrlsWithRegex(String jsonString) {
           };
 
           if (ignoreAudio) {
-            break; // Skip adding to urlsByType
+            continue;
           }
         }
 
         urlsByType[assetType]!.add(entry.key);
-        break;
       }
     }
   }
@@ -369,9 +299,7 @@ Map<String, String> _extractUrlsWithRegex(String jsonString) {
     };
 
     final assets = urlsByType[type]!.map((url) {
-      final filename = getFileNameFromURL(url);
-      final filepath =
-          assetMap[filename.toLowerCase()]; // O(1) case-insensitive lookup!
+      final filepath = resolveAssetPath(url, assetMap);
 
       return Asset(
         url: url,

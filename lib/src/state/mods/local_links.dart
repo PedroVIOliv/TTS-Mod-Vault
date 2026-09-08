@@ -1,25 +1,18 @@
-import 'dart:io' show File, Platform;
+import 'dart:io' show Directory, File, FileSystemException;
 
 import 'package:flutter/foundation.dart' show debugPrint;
-
 import 'package:path/path.dart' as p;
 import 'package:tts_mod_vault/src/state/asset/models/asset_model.dart'
     show Asset;
-import 'package:tts_mod_vault/src/utils.dart'
-    show newSteamUserContentUrl, oldCloudUrl;
 
-/// Builds the `file://` URL TTS stores for a cached asset.
-///
-/// The path is NOT percent-encoded: Unity hands it to the OS verbatim, so an
-/// encoded space makes it look for a directory literally named "My%20Games".
-/// Separators still have to be forward slashes, or the backslashes would need
-/// escaping inside the JSON.
-String localFileUrl(String filePath, {bool? windows}) {
-  final isWindows = windows ?? Platform.isWindows;
-  final slashed = filePath.replaceAll(r'\', '/');
+import '../asset/asset_rewrite.dart';
+import '../asset/asset_cache.dart';
+import '../asset/asset_document.dart';
+import '../asset/asset_identity.dart';
+import '../backup/recovery_bundle.dart';
 
-  return isWindows ? 'file:///$slashed' : 'file://$slashed';
-}
+export '../asset/asset_rewrite.dart'
+    show localFileUrl, LocalLinksRewriteResult, rewriteUrlsToLocalFiles;
 
 String localLinksOutputPath(String jsonFilePath) {
   final directory = p.dirname(jsonFilePath);
@@ -27,62 +20,6 @@ String localLinksOutputPath(String jsonFilePath) {
   final extension = p.extension(jsonFilePath);
 
   return p.join(directory, '$name Local$extension');
-}
-
-class LocalLinksRewriteResult {
-  final String jsonString;
-  final List<String> replacedUrls;
-  final List<String> notFoundUrls;
-
-  const LocalLinksRewriteResult({
-    required this.jsonString,
-    required this.replacedUrls,
-    required this.notFoundUrls,
-  });
-}
-
-LocalLinksRewriteResult rewriteUrlsToLocalFiles({
-  required String jsonString,
-  required Map<String, String> urlToFilePath,
-  bool? windows,
-}) {
-  var output = jsonString;
-  final replaced = <String>[];
-  final notFound = <String>[];
-
-  for (final entry in urlToFilePath.entries) {
-    final target = _urlAsStoredIn(output, entry.key);
-
-    if (target == null) {
-      notFound.add(entry.key);
-      continue;
-    }
-
-    output = output.replaceAll(
-      target,
-      localFileUrl(entry.value, windows: windows),
-    );
-    replaced.add(entry.key);
-  }
-
-  return LocalLinksRewriteResult(
-    jsonString: output,
-    replacedUrls: replaced,
-    notFoundUrls: notFound,
-  );
-}
-
-// Asset URLs are normalized to the akamaihd host, while the JSON on disk may
-// still hold the cloud-3 form of the same asset.
-String? _urlAsStoredIn(String jsonString, String url) {
-  if (jsonString.contains(url)) return url;
-
-  if (url.startsWith(newSteamUserContentUrl)) {
-    final cloudUrl = url.replaceFirst(newSteamUserContentUrl, oldCloudUrl);
-    if (jsonString.contains(cloudUrl)) return cloudUrl;
-  }
-
-  return null;
 }
 
 class ExportLocalLinksParams {
@@ -109,7 +46,42 @@ Future<LocalLinksRewriteResult> exportLocalLinksIsolate(
     urlToFilePath: params.urlToFilePath,
   );
 
-  await File(params.outputJsonFilePath).writeAsString(result.jsonString);
+  if (result.notFoundUrls.isNotEmpty) {
+    throw FormatException(
+        'Unmatched asset URLs: ${result.notFoundUrls.join(', ')}');
+  }
+  final seen = <String>{};
+  for (final reference in collectAssetReferences(result.jsonString)) {
+    final path = localPathFromUrl(reference.url);
+    if (path == null) {
+      throw FormatException('Unresolved asset: ${reference.url}');
+    }
+    if (seen.add('${reference.type.name}:$path')) {
+      await validateAssetFile(path, reference.type);
+    }
+  }
+  // Validate even supplied mappings not represented by recognized asset fields.
+  for (final path in params.urlToFilePath.values.toSet()) {
+    final handle = await File(path).open();
+    try {
+      if (await handle.length() == 0) {
+        throw FileSystemException('Empty asset', path);
+      }
+      await handle.read(1);
+    } finally {
+      await handle.close();
+    }
+  }
+  final staging = await Directory(p.dirname(params.outputJsonFilePath))
+      .createTemp('.local-');
+  try {
+    final temporary = File(p.join(staging.path, 'save.json'));
+    await temporary.writeAsString(result.jsonString, flush: true);
+    await commitFile(temporary.path, params.outputJsonFilePath,
+        overwrite: false);
+  } finally {
+    await staging.delete(recursive: true);
+  }
 
   await _copyThumbnail(params);
 
