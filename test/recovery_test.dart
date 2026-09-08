@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:archive/archive_io.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path/path.dart' as p;
 import 'package:tts_mod_vault/src/state/asset/asset_cache.dart';
 import 'package:tts_mod_vault/src/state/asset/asset_identity.dart';
 import 'package:tts_mod_vault/src/state/backup/recovery_bundle.dart';
@@ -29,7 +30,7 @@ void main() {
   });
   Future<String> bundle(String name,
       [String bytes = 'UnityFS\u0000payload']) async {
-    final file = File('${dir.path}/$name.unity3d');
+    final file = File(p.join(dir.path, '$name.unity3d'));
     await file.writeAsString(bytes);
     return file.path;
   }
