@@ -1,5 +1,9 @@
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:tts_mod_vault/src/models/log_entry.dart';
+import 'package:tts_mod_vault/src/state/mods/export_local_links_progress.dart'
+    show ExportLocalLinksProgressNotifier;
+import 'package:tts_mod_vault/src/state/mods/export_local_links_state.dart'
+    show ExportLocalLinksProgressEnum, ExportLocalLinksProgressState;
 import 'package:tts_mod_vault/src/providers/log_provider.dart';
 import 'package:tts_mod_vault/src/state/asset/existing_assets_state.dart';
 import 'package:tts_mod_vault/src/state/asset/existing_assets.dart';
@@ -176,6 +180,11 @@ final sortAndFilterProvider =
 
 final refreshingSharedAssetsProvider = StateProvider<bool>((ref) => false);
 
+final exportLocalLinksProgressProvider = StateNotifierProvider<
+    ExportLocalLinksProgressNotifier, ExportLocalLinksProgressState>(
+  (ref) => ExportLocalLinksProgressNotifier(),
+);
+
 final actionInProgressProvider = Provider<bool>((ref) {
   final modsAsyncValue = ref.watch(modsProvider);
   final isDownloading = ref.watch(downloadProvider).isDownloading;
@@ -186,6 +195,8 @@ final actionInProgressProvider = Provider<bool>((ref) {
   final backupStatus = ref.watch(backupProvider).status;
   final deletingBackup = ref.watch(existingBackupsProvider).deletingBackup;
   final refreshingSharedAssets = ref.watch(refreshingSharedAssetsProvider);
+  final exportingLocalLinks =
+      ref.watch(exportLocalLinksProgressProvider).status;
 
   return deleteAssetsStatus != DeleteAssetsStatusEnum.idle ||
       cleanUpStatus != CleanUpStatusEnum.idle ||
@@ -195,7 +206,8 @@ final actionInProgressProvider = Provider<bool>((ref) {
       isCheckingUrls ||
       modsAsyncValue is AsyncLoading ||
       deletingBackup ||
-      refreshingSharedAssets;
+      refreshingSharedAssets ||
+      exportingLocalLinks != ExportLocalLinksProgressEnum.idle;
 });
 
 final backupSortAndFilterProvider = StateNotifierProvider<

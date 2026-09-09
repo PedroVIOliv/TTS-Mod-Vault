@@ -186,6 +186,30 @@ void main() {
     expect(result.notFoundUrls, ['https://example.com/a.png']);
   });
 
+  test('recovery reports progress once per unique asset, ending at the total',
+      () async {
+    final source = File('${dir.path}/save.json');
+    await bundle(oldStem);
+    await source.writeAsString(jsonEncode({
+      'AssetbundleURL': remote,
+      // The same asset under its other identity must not be counted twice.
+      'AssetbundleSecondaryURL': old,
+      'ContainedObjects': [
+        {'AssetbundleURL': remote}
+      ],
+    }));
+    final seen = <(int, int)>[];
+    final assets = await resolveRecoveryAssets(
+      await source.readAsString(),
+      {AssetTypeEnum.assetBundle: dir.path},
+      onProgress: (done, total) => seen.add((done, total)),
+    );
+    expect(seen, isNotEmpty);
+    expect(seen.length, assets.length);
+    expect(seen.map((e) => e.$1), List.generate(seen.length, (i) => i + 1));
+    expect(seen.every((e) => e.$2 == seen.last.$1), true);
+  });
+
   test('export rejects stale paths and unresolved references without an output',
       () async {
     final source = File('${dir.path}/save.json');

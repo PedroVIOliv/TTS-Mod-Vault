@@ -21,17 +21,23 @@ class RecoveryAsset {
 
 /// Always reads JSON and disk afresh, including audio and already-local files.
 Future<List<RecoveryAsset>> resolveRecoveryAssets(
-    String source, Map<AssetTypeEnum, String> directories) async {
+  String source,
+  Map<AssetTypeEnum, String> directories, {
+  void Function(int done, int total)? onProgress,
+}) async {
   final caches = <AssetTypeEnum, Map<String, List<String>>>{};
   final references = collectAssetReferences(source);
   for (final type in references.map((r) => r.type).toSet()) {
     caches[type] = await scanAssetCache(directories[type] ?? '', type);
   }
+  final unique = <String, AssetReference>{};
+  for (final reference in references) {
+    unique.putIfAbsent('${reference.type.name}:${reference.url}', () => reference);
+  }
   final assets = <RecoveryAsset>[];
   final errors = <String>[];
-  final seen = <String>{};
-  for (final reference in references) {
-    if (!seen.add('${reference.type.name}:${reference.url}')) continue;
+  var done = 0;
+  for (final reference in unique.values) {
     final cache = caches[reference.type]!;
     try {
       final path =
@@ -40,6 +46,7 @@ Future<List<RecoveryAsset>> resolveRecoveryAssets(
     } on FileSystemException catch (e) {
       errors.add(e.toString());
     }
+    onProgress?.call(++done, unique.length);
   }
   if (errors.isNotEmpty) {
     throw FileSystemException(

@@ -51,6 +51,7 @@ import 'package:tts_mod_vault/src/state/provider.dart'
         directoriesProvider,
         existingAssetListsProvider,
         existingBackupsProvider,
+        exportLocalLinksProgressProvider,
         loadingMessageProvider,
         settingsProvider,
         sortAndFilterProvider,
@@ -1342,12 +1343,19 @@ class ModsStateNotifier extends AsyncNotifier<ModsState> {
   /// Fails without writing anything when an asset is not cached: a partially
   /// localised copy would silently lose those assets in TTS.
   Future<ExportLocalLinksResult> exportModWithLocalLinks(Mod mod) async {
+    final progress = ref.read(exportLocalLinksProgressProvider.notifier);
     try {
+      progress.startVerifying(mod.saveName);
       final source = await File(mod.jsonFilePath).readAsString();
-      final resolved = await resolveRecoveryAssets(source, {
-        for (final type in AssetTypeEnum.values)
-          type: ref.read(directoriesProvider.notifier).getDirectoryByType(type),
-      });
+      final resolved = await resolveRecoveryAssets(
+        source,
+        {
+          for (final type in AssetTypeEnum.values)
+            type:
+                ref.read(directoriesProvider.notifier).getDirectoryByType(type),
+        },
+        onProgress: progress.reportVerified,
+      );
       final outputPath = localLinksOutputPath(mod.jsonFilePath);
       if (await File(outputPath).exists()) {
         return ExportLocalLinksResult.outputExists(outputPath);
@@ -1357,6 +1365,7 @@ class ModsStateNotifier extends AsyncNotifier<ModsState> {
         for (final asset in resolved) asset.reference.url: asset.path,
       };
 
+      progress.startWriting();
       final rewrite = await compute(
         exportLocalLinksIsolate,
         ExportLocalLinksParams(
@@ -1367,12 +1376,16 @@ class ModsStateNotifier extends AsyncNotifier<ModsState> {
         ),
       );
 
+      progress.reset();
       await loadModsData();
 
       return ExportLocalLinksResult.success(outputPath, rewrite);
     } catch (e) {
       debugPrint('exportModWithLocalLinks error: $e');
       return ExportLocalLinksResult.failed(e.toString());
+    } finally {
+      // Every early return above leaves the bar showing otherwise.
+      progress.reset();
     }
   }
 

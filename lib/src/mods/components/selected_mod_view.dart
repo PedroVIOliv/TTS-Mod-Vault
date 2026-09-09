@@ -17,12 +17,15 @@ import 'package:tts_mod_vault/src/mods/components/components.dart'
         HelpTooltip,
         CustomTooltip,
         BackupProgressBar,
+        ExportLocalLinksProgressBar,
         MultiSelectView,
         PdfThumbnail;
 import 'package:tts_mod_vault/src/state/asset/models/asset_model.dart'
     show Asset;
 import 'package:tts_mod_vault/src/state/backup/backup_state.dart'
     show BackupStatusEnum;
+import 'package:tts_mod_vault/src/state/mods/export_local_links_state.dart'
+    show ExportLocalLinksProgressEnum;
 import 'package:tts_mod_vault/src/state/enums/asset_type_enum.dart'
     show AssetTypeEnum;
 import 'package:tts_mod_vault/src/state/mods/mod_model.dart'
@@ -31,6 +34,7 @@ import 'package:tts_mod_vault/src/state/provider.dart'
     show
         actionInProgressProvider,
         backupProvider,
+        exportLocalLinksProgressProvider,
         downloadProvider,
         modsProvider,
         multiModsProvider,
@@ -181,6 +185,7 @@ class _SelectedModViewComponent extends HookConsumerWidget {
 
     final downloadState = ref.watch(downloadProvider);
     final backupStatus = ref.watch(backupProvider).status;
+    final exportStatus = ref.watch(exportLocalLinksProgressProvider).status;
 
     final listItems = useMemoized(() => _buildListItems(), [selectedMod]);
     final availableAssetTypes = useMemoized(() {
@@ -551,7 +556,9 @@ class _SelectedModViewComponent extends HookConsumerWidget {
                 ? DownloadProgressBar()
                 : backupStatus != BackupStatusEnum.idle
                     ? BackupProgressBar()
-                    : SelectedModActionButtons(selectedMod: selectedMod)
+                    : exportStatus != ExportLocalLinksProgressEnum.idle
+                        ? const ExportLocalLinksProgressBar()
+                        : SelectedModActionButtons(selectedMod: selectedMod)
       ],
     );
   }
