@@ -27,6 +27,18 @@ List<String> assetUrls(String value) {
       : [];
 }
 
+/// Only a structural document decodes to a Map or List, so a leading brace or
+/// bracket settles it without entering the decoder and unwinding a throw for
+/// every ordinary string in the save.
+bool _mayBeJson(String value) {
+  for (var i = 0; i < value.length; i++) {
+    final unit = value.codeUnitAt(i);
+    if (unit == 0x20 || unit == 0x09 || unit == 0x0A || unit == 0x0D) continue;
+    return unit == 0x7B || unit == 0x5B;
+  }
+  return false;
+}
+
 /// Walk serialized objects, states and serialized JSON strings. Lua is never
 /// executed. JSON object literals embedded in Lua strings are inspected too.
 List<AssetReference> collectAssetReferences(String source) {
@@ -47,13 +59,15 @@ List<AssetReference> collectAssetReferences(String source) {
         visit(child);
       }
     } else if (value is String) {
-      try {
-        final decoded = jsonDecode(value);
-        if (decoded is Map || decoded is List) {
-          visit(decoded);
-          return;
-        }
-      } on FormatException {/* Not serialized JSON. */}
+      if (_mayBeJson(value)) {
+        try {
+          final decoded = jsonDecode(value);
+          if (decoded is Map || decoded is List) {
+            visit(decoded);
+            return;
+          }
+        } on FormatException {/* Not serialized JSON. */}
+      }
       for (final match in _luaStrings.allMatches(value)) {
         final literal = decodeLuaLiteral(match.group(0)!);
         if (literal != null && literal != value) {
@@ -124,10 +138,12 @@ String rewriteAssetDocument(String source, String? Function(String) resolve) {
         });
       }
     }
-    try {
-      final decoded = jsonDecode(value);
-      if (decoded is Map || decoded is List) return jsonEncode(visit(decoded));
-    } on FormatException {/* Ordinary text or script. */}
+    if (_mayBeJson(value)) {
+      try {
+        final decoded = jsonDecode(value);
+        if (decoded is Map || decoded is List) return jsonEncode(visit(decoded));
+      } on FormatException {/* Ordinary text or script. */}
+    }
     if (!lua) return value;
     return value.replaceAllMapped(_luaStrings, (match) {
       final token = match.group(0)!;
