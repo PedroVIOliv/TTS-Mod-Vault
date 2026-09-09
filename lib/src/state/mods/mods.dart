@@ -960,11 +960,11 @@ class ModsStateNotifier extends AsyncNotifier<ModsState> {
       _recomputeAffectedModAssetsStatic({
     required Set<String> affectedModJsonFileNames,
     required Map<String, Map<String, String>?> allModUrls,
-    required Map<String, String> assetBundles,
-    required Map<String, String> audio,
-    required Map<String, String> images,
-    required Map<String, String> models,
-    required Map<String, String> pdf,
+    required Map<String, List<String>> assetBundles,
+    required Map<String, List<String>> audio,
+    required Map<String, List<String>> images,
+    required Map<String, List<String>> models,
+    required Map<String, List<String>> pdf,
     required bool ignoreAudioGlobal,
     required Map<String, AudioAssetVisibility> modAudioPreferences,
   }) {
@@ -1152,7 +1152,7 @@ class ModsStateNotifier extends AsyncNotifier<ModsState> {
     }
   }
 
-  Map<String, String> _getAssetMapByType(AssetTypeEnum type) {
+  Map<String, List<String>> _getAssetMapByType(AssetTypeEnum type) {
     final existingAssets = ref.read(existingAssetListsProvider);
     return switch (type) {
       AssetTypeEnum.assetBundle => existingAssets.assetBundles,

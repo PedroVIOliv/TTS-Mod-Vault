@@ -234,8 +234,7 @@ class DeleteAssetsNotifier extends Notifier<DeleteAssetsState> {
           existingAssets.models,
           existingAssets.pdf
         ]) {
-          filePath =
-              resolveAssetPath(fileName, Map<String, String>.from(cache));
+          filePath = resolveAssetPath(fileName, cache);
           if (filePath != null) break;
         }
 

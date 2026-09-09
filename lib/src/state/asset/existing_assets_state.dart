@@ -1,10 +1,10 @@
 class ExistingAssetsListsState {
-  // Maps: filename -> filepath for O(1) lookups
-  final Map<String, String> assetBundles;
-  final Map<String, String> audio;
-  final Map<String, String> images;
-  final Map<String, String> models;
-  final Map<String, String> pdf;
+  // Maps: cache name -> every file path claiming it
+  final Map<String, List<String>> assetBundles;
+  final Map<String, List<String>> audio;
+  final Map<String, List<String>> images;
+  final Map<String, List<String>> models;
+  final Map<String, List<String>> pdf;
 
   ExistingAssetsListsState({
     required this.assetBundles,
@@ -22,11 +22,11 @@ class ExistingAssetsListsState {
         pdf = {};
 
   ExistingAssetsListsState copyWith({
-    Map<String, String>? assetBundles,
-    Map<String, String>? audio,
-    Map<String, String>? images,
-    Map<String, String>? models,
-    Map<String, String>? pdf,
+    Map<String, List<String>>? assetBundles,
+    Map<String, List<String>>? audio,
+    Map<String, List<String>>? images,
+    Map<String, List<String>>? models,
+    Map<String, List<String>>? pdf,
   }) {
     return ExistingAssetsListsState(
       assetBundles: assetBundles ?? this.assetBundles,

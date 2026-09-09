@@ -95,17 +95,21 @@ void main() {
     expect(duplicated, again);
   });
 
-  test(
-      'different bytes with same token are ambiguous even for exact local path',
+  test('different bytes with same token are refused, exact local path included',
       () async {
     final original = await bundle(oldStem);
     await bundle(
         'httpssteamusercontentaakamaihdnetugc10462623203842388677$hash',
         'UnityFS\u0000different');
     final cache = await scanAssetCache(dir.path, AssetTypeEnum.assetBundle);
-    expect(cache[assetCacheKey(remote)], '');
-    expect(resolveAssetPath(remote, cache), isNull);
-    expect(resolveAssetPath(localFileUrl(original), cache), isNull);
+    // The listing reports existence; agreement is settled per URL.
+    expect(resolveAssetPath(remote, cache), isNotNull);
+    for (final url in [remote, localFileUrl(original)]) {
+      await expectLater(
+          resolveVerifiedAssetPath(url, cache, AssetTypeEnum.assetBundle),
+          throwsA(isA<FileSystemException>().having(
+              (e) => e.message, 'message', conflictingCachedBytes)));
+    }
   });
 
   test('an uncontested damaged file is indexed but never resolved as verified',
@@ -114,25 +118,11 @@ void main() {
         'httpssteamusercontentaakamaihdnetugc10462623203842388677$hash',
         '<html>dead</html>');
     final cache = await scanAssetCache(dir.path, AssetTypeEnum.assetBundle);
-    // No sibling contests the name, so the scan indexes it without reading it.
+    // The scan reads nothing, so a damaged file still counts as present.
     expect(resolveAssetPath(remote, cache), broken);
     await expectLater(
         resolveVerifiedAssetPath(remote, cache, AssetTypeEnum.assetBundle),
         throwsA(isA<FileSystemException>()));
-  });
-
-  test('a damaged file leaves every name it claims, not just the contested one',
-      () async {
-    final original = await bundle(oldStem);
-    await bundle(
-        'httpssteamusercontentaakamaihdnetugc10462623203842388677$hash',
-        '<html>dead</html>');
-    final cache = await scanAssetCache(dir.path, AssetTypeEnum.assetBundle);
-    expect(cache.values, everyElement(original));
-    expect(
-        await resolveVerifiedAssetPath(
-            remote, cache, AssetTypeEnum.assetBundle),
-        original);
   });
 
   test('invalid exact bundle cannot hide a valid historical candidate',
@@ -141,9 +131,10 @@ void main() {
     await bundle(
         'httpssteamusercontentaakamaihdnetugc10462623203842388677$hash',
         '<html>dead</html>');
+    final cache = await scanAssetCache(dir.path, AssetTypeEnum.assetBundle);
     expect(
-        resolveAssetPath(
-            remote, await scanAssetCache(dir.path, AssetTypeEnum.assetBundle)),
+        await resolveVerifiedAssetPath(
+            remote, cache, AssetTypeEnum.assetBundle),
         original);
   });
 

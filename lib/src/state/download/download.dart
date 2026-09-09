@@ -243,29 +243,22 @@ class DownloadNotifier extends StateNotifier<DownloadState> {
     await ref
         .read(existingAssetListsProvider.notifier)
         .setExistingAssetsListByType(type);
-    final notifier = ref.read(existingAssetListsProvider.notifier);
+    final cache =
+        ref.read(existingAssetListsProvider.notifier).cacheByType(type);
     final urls = <String>[];
     for (final url in modAssetListUrls) {
-      if (notifier.isAssetAmbiguous(url, type)) {
-        throw StateError('Conflicting cached bytes for $url');
-      }
-      final cached = notifier.getAssetFilePath(url, type);
-      if (localPathFromUrl(url) != null) {
-        if (cached == null) {
+      try {
+        // Only this mod's assets are opened. Verifying here replaces a
+        // name-only check, which would skip a damaged or vanished file.
+        await resolveVerifiedAssetPath(url, cache, type);
+      } on FileSystemException catch (e) {
+        if (e.message == conflictingCachedBytes) {
+          throw StateError('$conflictingCachedBytes for $url');
+        }
+        if (localPathFromUrl(url) != null) {
           throw FileSystemException(
               'Missing local asset; restore its backup', url);
         }
-        continue;
-      }
-      if (cached == null) {
-        urls.add(url);
-        continue;
-      }
-      // Only this mod's assets are opened. A damaged cache entry is replaced
-      // rather than skipped, which a name-only check would do.
-      try {
-        await validateAssetFile(cached, type);
-      } on FileSystemException {
         urls.add(url);
       }
     }

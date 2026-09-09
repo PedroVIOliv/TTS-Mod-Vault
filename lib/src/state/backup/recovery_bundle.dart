@@ -22,7 +22,7 @@ class RecoveryAsset {
 /// Always reads JSON and disk afresh, including audio and already-local files.
 Future<List<RecoveryAsset>> resolveRecoveryAssets(
     String source, Map<AssetTypeEnum, String> directories) async {
-  final caches = <AssetTypeEnum, Map<String, String>>{};
+  final caches = <AssetTypeEnum, Map<String, List<String>>>{};
   final references = collectAssetReferences(source);
   for (final type in references.map((r) => r.type).toSet()) {
     caches[type] = await scanAssetCache(directories[type] ?? '', type);

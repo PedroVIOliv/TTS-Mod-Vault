@@ -41,11 +41,11 @@ class IsolateWorkData {
   final bool ignoreAudioAssets;
   final Map<String, AudioAssetVisibility> modAudioPreferences;
   // Asset existence maps for O(1) lookups
-  final Map<String, String> existingAssetBundles;
-  final Map<String, String> existingAudio;
-  final Map<String, String> existingImages;
-  final Map<String, String> existingModels;
-  final Map<String, String> existingPdf;
+  final Map<String, List<String>> existingAssetBundles;
+  final Map<String, List<String>> existingAudio;
+  final Map<String, List<String>> existingImages;
+  final Map<String, List<String>> existingModels;
+  final Map<String, List<String>> existingPdf;
 
   IsolateWorkData({
     required this.batches,
@@ -242,11 +242,11 @@ Map<String, String> extractUrlsFromJsonString(String jsonString) {
 /// Returns: (AssetLists, totalCount, existingCount, hasAudio)
 (AssetLists, int, int, bool) buildAssetListsFromUrls(
   Map<String, String> urlsData,
-  Map<String, String> assetBundles,
-  Map<String, String> audio,
-  Map<String, String> images,
-  Map<String, String> models,
-  Map<String, String> pdf,
+  Map<String, List<String>> assetBundles,
+  Map<String, List<String>> audio,
+  Map<String, List<String>> images,
+  Map<String, List<String>> models,
+  Map<String, List<String>> pdf,
   bool ignoreAudioGlobal,
   String modJsonFileName,
   Map<String, AudioAssetVisibility> modAudioPreferences,

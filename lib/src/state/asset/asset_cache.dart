@@ -8,6 +8,10 @@ import 'package:path/path.dart' as p;
 import 'asset_identity.dart';
 import '../enums/asset_type_enum.dart';
 
+/// Raised when candidate files for one URL hold different bytes, so no
+/// candidate can be chosen without guessing which one the save meant.
+const conflictingCachedBytes = 'Conflicting cached bytes';
+
 /// Header validation rejects common corrupt downloads; TTS itself remains the
 /// authority on complete media/Unity compatibility. Digests protect archives.
 Future<void> validateAssetFile(String path, AssetTypeEnum type) async {
@@ -59,14 +63,12 @@ Future<void> validateAssetFile(String path, AssetTypeEnum type) async {
 Future<String> assetDigest(String path) async =>
     (await sha256.bind(File(path).openRead()).first).toString();
 
-/// Values are real paths. An empty value marks conflicting byte contents,
-/// rather than silently choosing whichever directory entry was read last.
-///
-/// Contents are read only for names that collide, since a name owned by a
-/// single file needs no tie-break. Callers that must know an asset is intact
-/// validate it themselves; a scan of the whole cache directory cannot afford
-/// to open every file.
-Future<Map<String, String>> scanAssetCache(
+/// Values are every real path a name maps to, in a stable order. The scan
+/// reads no file contents: a directory holds thousands of assets, only a
+/// handful of which any one operation cares about, so whether two files
+/// claiming a name agree byte for byte is settled per URL by
+/// [resolveVerifiedAssetPath] instead.
+Future<Map<String, List<String>>> scanAssetCache(
     String directory, AssetTypeEnum type) async {
   final groups = <String, List<String>>{};
   if (directory.isEmpty || !await Directory(directory).exists()) return {};
@@ -77,65 +79,31 @@ Future<Map<String, String>> scanAssetCache(
       groups.putIfAbsent(key, () => []).add(entry.absolute.path);
     }
   }
-  // A file that shares any name with another is validated once and, if
-  // damaged, withdrawn from every name it claims. Dropping it only from the
-  // contested name would leave it reachable under its uncontested one and let
-  // it hide the readable candidate.
-  final contested = <String>{
-    for (final paths in groups.values.where((g) => g.length > 1)) ...paths
-  };
-  final damaged = <String>{};
-  for (final path in contested) {
-    try {
-      await validateAssetFile(path, type);
-    } on FileSystemException {
-      damaged.add(path);
-    }
+  for (final paths in groups.values) {
+    paths.sort();
   }
-  final result = <String, String>{};
-  for (final entry in groups.entries) {
-    final paths = entry.value.where((path) => !damaged.contains(path)).toList()
-      ..sort();
-    if (paths.isEmpty) continue;
-    if (paths.length == 1) {
-      result[entry.key] = paths.single;
-      continue;
-    }
-    final digests = <String>{};
-    for (final path in paths) {
-      digests.add(await assetDigest(path));
-    }
-    result[entry.key] = digests.length == 1 ? paths.first : '';
-  }
-  return result;
+  return groups;
 }
 
-String? resolveAssetPath(String url, Map<String, String> cache) {
-  final key = assetCacheKey(url);
-  // Ambiguity must not be bypassed by an exact path.
-  if (cache[key] == '' || cache[legacyAssetCacheKey(url)] == '') return null;
+/// Answers existence, which is all a listing needs. It opens nothing.
+String? resolveAssetPath(String url, Map<String, List<String>> cache) {
   final local = localPathFromUrl(url);
   if (local != null && File(local).existsSync()) {
     return File(local).absolute.path;
   }
-  final path = cache[legacyAssetCacheKey(url)] ?? cache[key];
-  return path == null || path.isEmpty ? null : path;
+  final paths = cache[legacyAssetCacheKey(url)] ?? cache[assetCacheKey(url)];
+  return paths == null || paths.isEmpty ? null : paths.first;
 }
 
 /// A strict operation also compares exact/query-name and hash candidates. The
 /// cache filename itself is never used as evidence that their bytes agree.
 Future<String> resolveVerifiedAssetPath(
-    String url, Map<String, String> cache, AssetTypeEnum type) async {
-  final key = assetCacheKey(url);
-  final legacy = legacyAssetCacheKey(url);
-  if (cache[key] == '' || cache[legacy] == '') {
-    throw FileSystemException('Conflicting cached bytes', url);
-  }
+    String url, Map<String, List<String>> cache, AssetTypeEnum type) async {
   final local = localPathFromUrl(url);
   final candidates = <String>{
     if (local != null) File(local).absolute.path,
-    if (cache[legacy] != null) cache[legacy]!,
-    if (cache[key] != null) cache[key]!,
+    ...?cache[legacyAssetCacheKey(url)],
+    ...?cache[assetCacheKey(url)],
   };
   final valid = <String>[];
   for (final path in candidates) {
@@ -153,7 +121,7 @@ Future<String> resolveVerifiedAssetPath(
       digests.add(await assetDigest(path));
     }
     if (digests.length != 1) {
-      throw FileSystemException('Conflicting cached bytes', url);
+      throw FileSystemException(conflictingCachedBytes, url);
     }
   }
   return valid.first;

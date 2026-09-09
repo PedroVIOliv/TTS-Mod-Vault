@@ -36,7 +36,7 @@ class ExistingAssetsNotifier extends StateNotifier<ExistingAssetsListsState> {
 
     final results = await Future.wait(futures);
 
-    final Map<AssetTypeEnum, Map<String, String>> resultMap = {
+    final Map<AssetTypeEnum, Map<String, List<String>>> resultMap = {
       for (final (type, assetMap) in results) type: assetMap
     };
 
@@ -66,16 +66,19 @@ class ExistingAssetsNotifier extends StateNotifier<ExistingAssetsListsState> {
   /// cache absorbs them without re-listing the directory.
   void addExistingAssets(
       AssetTypeEnum type, Iterable<(String, String)> downloads) {
-    final updated = Map<String, String>.from(_getAssetMapByType(type));
+    final updated = Map<String, List<String>>.from(_getAssetMapByType(type));
     for (final (url, filepath) in downloads) {
       for (final key in {assetCacheKey(url), legacyAssetCacheKey(url)}) {
-        updated[key] = filepath;
+        updated[key] = [filepath];
       }
     }
     _updateStateByType(type, updated);
   }
 
-  Map<String, String> _getAssetMapByType(AssetTypeEnum type) {
+  Map<String, List<String>> cacheByType(AssetTypeEnum type) =>
+      _getAssetMapByType(type);
+
+  Map<String, List<String>> _getAssetMapByType(AssetTypeEnum type) {
     return switch (type) {
       AssetTypeEnum.assetBundle => state.assetBundles,
       AssetTypeEnum.audio => state.audio,
@@ -85,7 +88,8 @@ class ExistingAssetsNotifier extends StateNotifier<ExistingAssetsListsState> {
     };
   }
 
-  void _updateStateByType(AssetTypeEnum type, Map<String, String> assetMap) {
+  void _updateStateByType(
+      AssetTypeEnum type, Map<String, List<String>> assetMap) {
     state = switch (type) {
       AssetTypeEnum.assetBundle => state.copyWith(assetBundles: assetMap),
       AssetTypeEnum.audio => state.copyWith(audio: assetMap),
@@ -97,10 +101,6 @@ class ExistingAssetsNotifier extends StateNotifier<ExistingAssetsListsState> {
 
   bool doesAssetFileExist(String assetFileName, AssetTypeEnum type) =>
       resolveAssetPath(assetFileName, _getAssetMapByType(type)) != null;
-
-  bool isAssetAmbiguous(String url, AssetTypeEnum type) =>
-      _getAssetMapByType(type)[assetCacheKey(url)] == '' ||
-      _getAssetMapByType(type)[legacyAssetCacheKey(url)] == '';
 
   String? getAssetFilePath(String assetFilename, AssetTypeEnum type) =>
       resolveAssetPath(assetFilename, _getAssetMapByType(type));
