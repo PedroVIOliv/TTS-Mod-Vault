@@ -62,6 +62,19 @@ class ExistingAssetsNotifier extends StateNotifier<ExistingAssetsListsState> {
     _updateStateByType(type, assetMap);
   }
 
+  /// Freshly downloaded files were validated before being committed, so the
+  /// cache absorbs them without re-listing the directory.
+  void addExistingAssets(
+      AssetTypeEnum type, Iterable<(String, String)> downloads) {
+    final updated = Map<String, String>.from(_getAssetMapByType(type));
+    for (final (url, filepath) in downloads) {
+      for (final key in {assetCacheKey(url), legacyAssetCacheKey(url)}) {
+        updated[key] = filepath;
+      }
+    }
+    _updateStateByType(type, updated);
+  }
+
   Map<String, String> _getAssetMapByType(AssetTypeEnum type) {
     return switch (type) {
       AssetTypeEnum.assetBundle => state.assetBundles,

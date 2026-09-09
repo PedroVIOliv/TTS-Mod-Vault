@@ -61,34 +61,51 @@ Future<String> assetDigest(String path) async =>
 
 /// Values are real paths. An empty value marks conflicting byte contents,
 /// rather than silently choosing whichever directory entry was read last.
+///
+/// Contents are read only for names that collide, since a name owned by a
+/// single file needs no tie-break. Callers that must know an asset is intact
+/// validate it themselves; a scan of the whole cache directory cannot afford
+/// to open every file.
 Future<Map<String, String>> scanAssetCache(
     String directory, AssetTypeEnum type) async {
   final groups = <String, List<String>>{};
   if (directory.isEmpty || !await Directory(directory).exists()) return {};
   await for (final entry in Directory(directory).list(followLinks: false)) {
     if (entry is! File || p.basename(entry.path).endsWith('_temp')) continue;
-    try {
-      await validateAssetFile(entry.path, type);
-    } on FileSystemException {
-      continue;
-    }
     final stem = p.basenameWithoutExtension(entry.path);
     for (final key in {assetCacheKey(stem), legacyAssetCacheKey(stem)}) {
       groups.putIfAbsent(key, () => []).add(entry.absolute.path);
     }
   }
+  // A file that shares any name with another is validated once and, if
+  // damaged, withdrawn from every name it claims. Dropping it only from the
+  // contested name would leave it reachable under its uncontested one and let
+  // it hide the readable candidate.
+  final contested = <String>{
+    for (final paths in groups.values.where((g) => g.length > 1)) ...paths
+  };
+  final damaged = <String>{};
+  for (final path in contested) {
+    try {
+      await validateAssetFile(path, type);
+    } on FileSystemException {
+      damaged.add(path);
+    }
+  }
   final result = <String, String>{};
   for (final entry in groups.entries) {
-    final paths = entry.value..sort();
+    final paths = entry.value.where((path) => !damaged.contains(path)).toList()
+      ..sort();
+    if (paths.isEmpty) continue;
     if (paths.length == 1) {
       result[entry.key] = paths.single;
-    } else {
-      final digests = <String>{};
-      for (final path in paths) {
-        digests.add(await assetDigest(path));
-      }
-      result[entry.key] = digests.length == 1 ? paths.first : '';
+      continue;
     }
+    final digests = <String>{};
+    for (final path in paths) {
+      digests.add(await assetDigest(path));
+    }
+    result[entry.key] = digests.length == 1 ? paths.first : '';
   }
   return result;
 }

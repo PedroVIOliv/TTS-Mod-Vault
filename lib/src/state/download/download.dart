@@ -238,28 +238,37 @@ class DownloadNotifier extends StateNotifier<DownloadState> {
       state = state.copyWith(cancelledDownloads: false);
     }
 
+    // The cache index can predate files appearing or being removed outside the
+    // app, so the skip decision runs against a fresh listing.
     await ref
         .read(existingAssetListsProvider.notifier)
         .setExistingAssetsListByType(type);
-    final urls = modAssetListUrls.where((url) {
-      if (ref
-          .read(existingAssetListsProvider.notifier)
-          .isAssetAmbiguous(url, type)) {
+    final notifier = ref.read(existingAssetListsProvider.notifier);
+    final urls = <String>[];
+    for (final url in modAssetListUrls) {
+      if (notifier.isAssetAmbiguous(url, type)) {
         throw StateError('Conflicting cached bytes for $url');
       }
+      final cached = notifier.getAssetFilePath(url, type);
       if (localPathFromUrl(url) != null) {
-        if (!ref
-            .read(existingAssetListsProvider.notifier)
-            .doesAssetFileExist(url, type)) {
+        if (cached == null) {
           throw FileSystemException(
               'Missing local asset; restore its backup', url);
         }
-        return false;
+        continue;
       }
-      return !ref
-          .read(existingAssetListsProvider.notifier)
-          .doesAssetFileExist(url, type);
-    }).toList();
+      if (cached == null) {
+        urls.add(url);
+        continue;
+      }
+      // Only this mod's assets are opened. A damaged cache entry is replaced
+      // rather than skipped, which a name-only check would do.
+      try {
+        await validateAssetFile(cached, type);
+      } on FileSystemException {
+        urls.add(url);
+      }
+    }
 
     // Track successful downloads
     final List<(String, String)> successfulDownloads = [];
@@ -411,9 +420,9 @@ class DownloadNotifier extends StateNotifier<DownloadState> {
     } finally {
       // Add successful downloads to existing assets list
       if (successfulDownloads.isNotEmpty) {
-        final existingAssetsNotifier =
-            ref.read(existingAssetListsProvider.notifier);
-        await existingAssetsNotifier.setExistingAssetsListByType(type);
+        ref
+            .read(existingAssetListsProvider.notifier)
+            .addExistingAssets(type, successfulDownloads);
       }
 
       if (!downloadingAllFiles) {

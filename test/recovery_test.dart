@@ -108,6 +108,33 @@ void main() {
     expect(resolveAssetPath(localFileUrl(original), cache), isNull);
   });
 
+  test('an uncontested damaged file is indexed but never resolved as verified',
+      () async {
+    final broken = await bundle(
+        'httpssteamusercontentaakamaihdnetugc10462623203842388677$hash',
+        '<html>dead</html>');
+    final cache = await scanAssetCache(dir.path, AssetTypeEnum.assetBundle);
+    // No sibling contests the name, so the scan indexes it without reading it.
+    expect(resolveAssetPath(remote, cache), broken);
+    await expectLater(
+        resolveVerifiedAssetPath(remote, cache, AssetTypeEnum.assetBundle),
+        throwsA(isA<FileSystemException>()));
+  });
+
+  test('a damaged file leaves every name it claims, not just the contested one',
+      () async {
+    final original = await bundle(oldStem);
+    await bundle(
+        'httpssteamusercontentaakamaihdnetugc10462623203842388677$hash',
+        '<html>dead</html>');
+    final cache = await scanAssetCache(dir.path, AssetTypeEnum.assetBundle);
+    expect(cache.values, everyElement(original));
+    expect(
+        await resolveVerifiedAssetPath(
+            remote, cache, AssetTypeEnum.assetBundle),
+        original);
+  });
+
   test('invalid exact bundle cannot hide a valid historical candidate',
       () async {
     final original = await bundle(oldStem);
