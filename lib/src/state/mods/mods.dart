@@ -88,6 +88,11 @@ class ModsStateNotifier extends AsyncNotifier<ModsState> {
   }) async {
     final startTime = DateTime.now();
     debugPrint('loadModsData START: $startTime');
+    final phase = Stopwatch()..start();
+    void mark(String name) {
+      debugPrint('loadModsData phase: $name ${phase.elapsedMilliseconds}ms');
+      phase.reset();
+    }
 
     ref.read(loadingMessageProvider.notifier).state = 'Loading';
     state = const AsyncValue.loading();
@@ -100,6 +105,7 @@ class ModsStateNotifier extends AsyncNotifier<ModsState> {
     } catch (e) {
       debugPrint("loadModsData - error on clearing cache: $e");
     }
+    mark('clearCache');
 
     try {
       // Contains setting loading message provider
@@ -107,6 +113,7 @@ class ModsStateNotifier extends AsyncNotifier<ModsState> {
     } catch (e) {
       debugPrint("loadModsData - error on loading existing backups: $e");
     }
+    mark('existingBackups');
 
     try {
       ref.read(loadingMessageProvider.notifier).state =
@@ -115,6 +122,7 @@ class ModsStateNotifier extends AsyncNotifier<ModsState> {
       await ref
           .read(existingAssetListsProvider.notifier)
           .loadExistingAssetsLists();
+      mark('assetCacheScan');
 
       ref.read(loadingMessageProvider.notifier).state =
           'Creating lists of items to load';
@@ -145,6 +153,7 @@ class ModsStateNotifier extends AsyncNotifier<ModsState> {
       }
 
       final jsonPaths = await Future.wait(jsonPathsFutures);
+      mark('listJsonFiles');
 
       debugPrint('loadModsData - getting initial mods ${DateTime.now()}');
 
@@ -158,6 +167,7 @@ class ModsStateNotifier extends AsyncNotifier<ModsState> {
       }
 
       final initialMods = await getInitialMods(allPaths);
+      mark('getInitialMods (${initialMods.length} mods)');
 
       // Prune storage entries for mods no longer on disk
       final validJsonFileNames = initialMods.map((m) => m.jsonFileName).toSet();
@@ -170,6 +180,7 @@ class ModsStateNotifier extends AsyncNotifier<ModsState> {
       final allCachedUrls = ref.read(storageProvider).getAllModUrls();
       final allAudioPreferences =
           ref.read(storageProvider).getAllModAudioPreferences();
+      mark('readStorageCache');
 
       // Filter to only the mods we need
       final Map<String, String?> cachedDateTimeStamps = {};
@@ -249,12 +260,14 @@ class ModsStateNotifier extends AsyncNotifier<ModsState> {
           ? 'Loading ${jsonPaths[0].length} mods, ${jsonPaths[1].length} saves and ${jsonPaths[2].length} saved objects'
           : 'Loading ${jsonPaths[0].length} mods and ${jsonPaths[1].length} saves';
 
+      mark('prepareIsolateWork');
       final List<IsolateWorkResult> allResults = await Future.wait(
         isolateWorkData
             .map((workData) =>
                 Isolate.run(() => processMultipleBatchesInIsolate(workData)))
             .toList(),
       );
+      mark('parseModsInIsolates');
 
       debugPrint(
           'All isolates completed at ${DateTime.now()}. Processing results...');
@@ -290,6 +303,7 @@ class ModsStateNotifier extends AsyncNotifier<ModsState> {
 
         debugPrint('Bulk storage operations completed ${DateTime.now()}');
       }
+      mark('writeStorageCache');
 
       final mods = <Mod>[];
       final saves = <Mod>[];
@@ -331,6 +345,8 @@ class ModsStateNotifier extends AsyncNotifier<ModsState> {
             break;
         }
       }
+
+      mark('buildModObjects');
 
       // Set filters state
       ref.read(sortAndFilterProvider.notifier).resetState();
